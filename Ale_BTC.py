@@ -13,6 +13,7 @@ archivo_memoria = "memoria_gladiador.txt"
 # --- VARIABLES DE SEGUIMIENTO ---
 precio_maximo_alcanzado = 0
 posicion_abierta = False
+ultimo_cierre_time = 0 
 
 def guardar_en_memoria(precio, pnl, motivo):
     with open(archivo_memoria, "a") as f:
@@ -38,13 +39,13 @@ def calcular_adx(df, period=14):
     df['dx'] = 100 * abs(df['+di'] - df['-di']) / (df['+di'] + df['-di'])
     return df['dx'].rolling(window=period).mean().iloc[-1]
 
-def ejecutar_gladiador_v6_estable():
-    global precio_maximo_alcanzado, posicion_abierta
-    print(f"🔱 GLADIADOR QUANTUM V6: MODO ESTABLE (ANTI-BANEO) ACTIVADO")
+def ejecutar_gladiador_v6_1():
+    global precio_maximo_alcanzado, posicion_abierta, ultimo_cierre_time
+    print(f"🔱 GLADIADOR QUANTUM V6.1: FILTRO DE RUIDO Y API OPTIMIZADA")
     
     while True:
         try:
-            # 1. Obtención de datos con respiro para la API
+            # 1. Obtención de datos (1 sola llamada pesada)
             klines = client.futures_klines(symbol=symbol, interval='1m', limit=100)
             df = pd.DataFrame(klines, columns=['t','open','high','low','close','v','ct','q','n','tb','tq','i'])
             df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
@@ -61,27 +62,28 @@ def ejecutar_gladiador_v6_estable():
             mecha_inf = min(v['open'], v['close']) - v['low']
             cuerpo = abs(v['close'] - v['open'])
 
-            # 2. Revisar posición (Solo una llamada para ahorrar crédito de API)
+            # 2. Revisar posición
             pos = client.futures_position_information(symbol=symbol)
             datos_pos = next((p for p in pos if p['symbol'] == symbol), None)
             amt = float(datos_pos['positionAmt']) if datos_pos else 0
             pnl = 0
 
-            # --- LÓGICA DE ENTRADA ---
+            # --- LÓGICA DE ENTRADA CON ENFRIAMIENTO ---
+            # Esperamos 3 minutos entre trades para evitar el "ametrallamiento" de órdenes
             if amt == 0:
                 posicion_abierta = False
                 precio_maximo_alcanzado = 0
                 
-                # Caza de giros en ADX Extremo
-                if adx_val > 65:
-                    if precio > ema_20 and es_roja and mecha_sup > (cuerpo * 1.5):
-                        client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=cantidad_prueba)
-                        print("📉 ENTRANDO EN SHORT (GIRO EN EL PICO)")
-                    elif precio < ema_20 and es_verde and mecha_inf > (cuerpo * 1.5):
-                        client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=cantidad_prueba)
-                        print("🚀 ENTRANDO EN LONG (GIRO EN EL PISO)")
+                if (time.time() - ultimo_cierre_time) > 180: # 180 seg = 3 min
+                    if adx_val > 65:
+                        if precio > ema_20 and es_roja and mecha_sup > (cuerpo * 1.5):
+                            client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=cantidad_prueba)
+                            print("📉 ENTRADA SHORT (GIRO)")
+                        elif precio < ema_20 and es_verde and mecha_inf > (cuerpo * 1.5):
+                            client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=cantidad_prueba)
+                            print("🚀 ENTRADA LONG (GIRO)")
 
-            # --- LÓGICA DE SEGUIMIENTO Y CIERRE ---
+            # --- LÓGICA DE SEGUIMIENTO (TRAILING DINÁMICO) ---
             elif amt != 0:
                 if not posicion_abierta:
                     posicion_abierta = True
@@ -90,7 +92,6 @@ def ejecutar_gladiador_v6_estable():
                 entrada = float(datos_pos['entryPrice'])
                 pnl = ((precio - entrada) / entrada * 100) if amt > 0 else ((entrada - precio) / entrada * 100)
 
-                # Actualizar el pico máximo para el Trailing
                 if amt > 0: # Long
                     if precio > precio_maximo_alcanzado: precio_maximo_alcanzado = precio
                     retroceso = (precio_maximo_alcanzado - precio) / precio_maximo_alcanzado * 100
@@ -98,23 +99,27 @@ def ejecutar_gladiador_v6_estable():
                     if precio < precio_maximo_alcanzado: precio_maximo_alcanzado = precio
                     retroceso = (precio - precio_maximo_alcanzado) / precio_maximo_alcanzado * 100
 
-                # Umbral de vuelta dinámico
-                margen_vuelta = 0.25 if pnl > 0.4 else 0.65
+                # --- FILTRO DE GANANCIA REAL ---
+                # Si el ROI es menor a 0.3%, le damos aire (1.0%) para que no cierre en pérdida por ruido
+                # Si ya ganamos más de 0.4%, el Trailing se vuelve agresivo (0.2%) para atrapar la punta
+                if pnl > 0.4:
+                    margen_vuelta = 0.2
+                else:
+                    margen_vuelta = 1.0 # Le damos aire para que corra
                 
                 if retroceso > margen_vuelta:
                     client.futures_create_order(symbol=symbol, side='SELL' if amt > 0 else 'BUY', type='MARKET', quantity=abs(amt))
-                    guardar_en_memoria(precio, pnl, f"💰 CIERRE: Pegó la vuelta (Retroceso: {retroceso:.2f}%)")
+                    ultimo_cierre_time = time.time()
+                    guardar_en_memoria(precio, pnl, f"💰 CIERRE ESTRATÉGICO (ROI: {pnl:.2f}%)")
 
-            # Muestra el estado actual en el log de Railway
             print(f"📊 SOL: {precio:.2f} | ADX: {adx_val:.1f} | ROI: {pnl:.2f}% | Max: {precio_maximo_alcanzado}")
             
-            # --- LÍNEA CLAVE PARA EVITAR BANEO (ERROR -1003) ---
-            time.sleep(12) 
+            # Aumentamos a 15 seg para evitar el baneo de IP de Railway (Error -1003)
+            time.sleep(15) 
 
         except Exception as e:
-            # Si hay error de baneo, esperamos un poco más
-            print(f"⚠️ Alerta: {e}")
-            time.sleep(30)
+            print(f"⚠️ API Info: {e}")
+            time.sleep(40) # Respiro largo si hay error
 
 if __name__ == "__main__":
-    ejecutar_gladiador_v6_estable()
+    ejecutar_gladiador_v6_1()
