@@ -1,23 +1,21 @@
-import os, time, pandas as pd
-import numpy as np
+import os, time, pandas as pd, numpy as np
 from binance.client import Client
 
-# --- CONEXIÓN ---
+# --- CONFIGURACIÓN ---
 api_key = os.getenv('BINANCE_API_KEY')
 api_secret = os.getenv('BINANCE_API_SECRET')
 client = Client(api_key, api_secret)
 
 symbol = "SOLUSDT"
-leverage = 10
-cantidad_prueba = 0.1  # MÍNIMO PARA PRUEBAS
+cantidad_prueba = 0.1  # Mínimo para testear
 archivo_memoria = "memoria_gladiador.txt"
 precio_extremo = None
 
-def guardar_en_memoria(mensaje):
+def guardar_memoria_distancia(precio, dist, motivo):
     with open(archivo_memoria, "a") as f:
-        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-        f.write(f"[{timestamp}] {mensaje}\n")
-    print(f"📝 MEMORIA: {mensaje}")
+        log = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Precio: {precio} | Dist_EMA200: {dist:.2f}% | Motivo: {motivo}\n"
+        f.write(log)
+    print(f"📝 MEMORIA GUARDADA: {motivo} a {dist:.2f}% de distancia.")
 
 def calcular_adx(df, period=14):
     df = df.copy()
@@ -37,66 +35,63 @@ def calcular_adx(df, period=14):
     df['dx'] = 100 * abs(df['+di'] - df['-di']) / (df['+di'] + df['-di'])
     return df['dx'].rolling(window=period).mean().iloc[-1]
 
-def ejecutar_gladiador_con_memoria():
+def ejecutar_gladiador_quantum():
     global precio_extremo
-    print(f"🔱 GLADIADOR CON MEMORIA ACTIVADO | {symbol}")
+    print(f"🔱 GLADIADOR QUANTUM: LEYENDO DISTANCIAS Y VELAS...")
     
     while True:
         try:
-            klines = client.futures_klines(symbol=symbol, interval='1m', limit=200)
-            df = pd.DataFrame(klines, columns=['time','open','high','low','close','vol','ct','q','n','tb','tq','i'])
-            df[['high','low','close']] = df[['high','low','close']].astype(float)
+            klines = client.futures_klines(symbol=symbol, interval='1m', limit=100)
+            df = pd.DataFrame(klines, columns=['t','open','high','low','close','v','ct','q','n','tb','tq','i'])
+            df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
             
-            precio = df['close'].iloc[-1]
+            # --- DATOS ACTUALES ---
+            v = df.iloc[-1]
+            precio = v['close']
             ema_20 = df['close'].ewm(span=20, adjust=False).mean().iloc[-1]
             ema_200 = df['close'].ewm(span=200, adjust=False).mean().iloc[-1]
             adx_val = calcular_adx(df)
+            dist_200 = abs(precio - ema_200) / ema_200 * 100
+
+            # --- ANÁLISIS DE VELAS (PATRONES DE LIBRO) ---
+            cuerpo = abs(v['close'] - v['open'])
+            mecha_sup = v['high'] - max(v['open'], v['close'])
+            mecha_inf = min(v['open'], v['close']) - v['low']
+            martillo_inv = mecha_sup > (cuerpo * 2) and cuerpo > 0
             
-            distancia_200 = abs(precio - ema_200) / ema_200 * 100
             pos = client.futures_position_information(symbol=symbol)
             datos_pos = next((p for p in pos if p['symbol'] == symbol), None)
             amt = float(datos_pos['positionAmt']) if datos_pos else 0
 
-            # --- DETECCIÓN DE AGOTAMIENTO PARA LA MEMORIA ---
-            if distancia_200 > 1.8: # Si se aleja mucho de la EMA 200 (la violeta)
-                guardar_en_memoria(f"Nivel de agotamiento detectado en {precio}. Posible zigzag.")
-
-            # --- LÓGICA DE ENTRADA ---
+            # --- LÓGICA DE ENTRADA INTELIGENTE ---
             if amt == 0:
                 precio_extremo = None
-                # No entramos si estamos en zona de agotamiento extremo para evitar el piso sucio
-                if adx_val > 30 and distancia_200 < 1.8:
+                # Solo entramos si no estamos en el pico (Distancia < 1.2% y ADX < 45)
+                if 30 < adx_val < 45 and dist_200 < 1.2:
                     if precio > (ema_20 * 1.002):
                         client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=cantidad_prueba)
-                        print(f"🚀 ENTRADA LONG")
+                        guardar_memoria_distancia(precio, dist_200, "ENTRADA LONG")
                     elif precio < (ema_20 * 0.998):
                         client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=cantidad_prueba)
-                        print(f"📉 ENTRADA SHORT")
+                        guardar_memoria_distancia(precio, dist_200, "ENTRADA SHORT")
 
-            # --- CIERRE INVISIBLE (TRAILING MENTAL) ---
+            # --- CIERRE POR DISTANCIA O VELAS ---
             elif amt != 0:
                 if precio_extremo is None: precio_extremo = precio
                 
-                if amt < 0: # SHORT
-                    if precio < precio_extremo: precio_extremo = precio
-                    rebote = (precio - precio_extremo) / precio_extremo * 100
-                    if rebote > 0.3 or precio > (ema_20 * 1.001):
-                        client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=abs(amt))
-                        guardar_en_memoria(f"CIERRE SHORT en {precio} por rebote de {rebote:.2f}%")
-                
-                elif amt > 0: # LONG
+                if amt > 0: # LONG
                     if precio > precio_extremo: precio_extremo = precio
                     caida = (precio_extremo - precio) / precio_extremo * 100
-                    if caida > 0.3 or precio < (ema_20 * 0.999):
+                    # GATILLO: Si cae 0.6% O si hace el Martillo Invertido que dijiste arriba
+                    if caida > 0.6 or (martillo_inv and dist_200 > 1.0):
                         client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=abs(amt))
-                        guardar_en_memoria(f"CIERRE LONG en {precio} por caída de {caida:.2f}%")
+                        guardar_memoria_distancia(precio, dist_200, f"CIERRE LONG (Gatillo Vela/Caída {caida:.2f}%)")
 
-            print(f"📊 {precio:.2f} | ADX: {adx_val:.1f} | Dist200: {distancia_200:.2f}%")
+            print(f"📊 SOL: {precio:.2f} | ADX: {adx_val:.1f} | Dist: {dist_200:.2f}%")
             time.sleep(10)
 
         except Exception as e:
-            print(f"⚠️ Error: {e}")
-            time.sleep(10)
+            print(f"⚠️ Error: {e}"); time.sleep(10)
 
 if __name__ == "__main__":
-    ejecutar_gladiador_con_memoria()
+    ejecutar_gladiador_quantum()
