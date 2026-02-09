@@ -107,7 +107,7 @@ def ejecutar_gladiador_v6():
                     guardar_en_memoria(precio, pnl, f"💰 CIERRE EN LA VUELTA (Retroceso: {retroceso:.2f}%)")
 
             print(f"📊 SOL: {precio:.2f} | ADX: {adx_val:.1f} | ROI: {pnl if amt != 0 else 0:.2f}% | Max: {precio_maximo_alcanzado}")
-            time.sleep(5) # Más rápido para no perder el giro
+            time.sleep(12) # Más rápido para no perder el giro
 
         except Exception as e:
             print(f"⚠️ Error: {e}"); time.sleep(10)
