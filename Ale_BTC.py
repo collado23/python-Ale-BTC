@@ -2,15 +2,14 @@ import os, time, pandas as pd
 import numpy as np
 from binance.client import Client
 
-# --- CONEXIÓN ---
+# --- CONEXIÓN Y CONFIGURACIÓN ---
 api_key = os.getenv('BINANCE_API_KEY')
 api_secret = os.getenv('BINANCE_API_SECRET')
 client = Client(api_key, api_secret)
 
-symbol = "SOLUSDT" 
+symbol = "SOLUSDT"
 leverage = 10
-# Vamos a usar una cantidad fija pequeña para la prueba: 0.5 SOL
-cantidad_prueba = 0.5 
+cantidad_prueba = 0.5 # Mantenemos cantidad fija para evitar errores de decimales
 
 def calcular_adx(df, period=14):
     df = df.copy()
@@ -30,8 +29,8 @@ def calcular_adx(df, period=14):
     df['dx'] = 100 * abs(df['+di'] - df['-di']) / (df['+di'] + df['-di'])
     return df['dx'].rolling(window=period).mean().iloc[-1]
 
-def ejecutar_gladiador_sol():
-    print(f"🔱 SOLANA: PRUEBA DE GIRO CON CANTIDAD FIJA (0.5 SOL)")
+def ejecutar_gladiador_inteligente():
+    print(f"🔱 GLADIADOR SOL: MODO SALIDA ANTICIPADA ACTIVADO")
     
     while True:
         try:
@@ -47,23 +46,34 @@ def ejecutar_gladiador_sol():
             datos_pos = next((p for p in pos if p['symbol'] == symbol), None)
             amt = float(datos_pos['positionAmt']) if datos_pos else 0
 
-            # 🔱 LÓGICA DE GIRO
+            # --- LÓGICA DE PROTECCIÓN ---
+            adx_debil = adx_val < 25 # Si baja de 25, la tendencia se agota
+
+            # 1. SI NO HAY POSICIÓN: Solo entra con ADX fuerte (>30)
             if amt == 0:
-                side = 'SELL' if precio < ema_20 else 'BUY'
-                client.futures_create_order(symbol=symbol, side=side, type='MARKET', quantity=cantidad_prueba)
-                print(f"🚀 ENTRADA SOL: {side} (Cantidad: {cantidad_prueba})")
+                if adx_val > 30:
+                    side = 'SELL' if precio < (ema_20 * 0.999) else 'BUY' if precio > (ema_20 * 1.001) else None
+                    if side:
+                        client.futures_create_order(symbol=symbol, side=side, type='MARKET', quantity=cantidad_prueba)
+                        print(f"🚀 ENTRADA FUERTE: {side} (ADX: {adx_val:.1f})")
 
-            elif amt < 0 and precio > ema_20: # Giro a Long
-                client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=abs(amt))
-                client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=cantidad_prueba)
-                print(f"🔄 GIRO: Precio {precio} rompió EMA 20. Pasando a LONG.")
+            # 2. SI ESTAMOS EN SHORT
+            elif amt < 0:
+                # Cierre por cruce de EMA o porque la tendencia se murió (ADX débil)
+                if precio > (ema_20 * 1.001) or adx_debil:
+                    razon = "Giro EMA" if precio > ema_20 else "ADX Débil (Asegurando)"
+                    client.futures_create_order(symbol=symbol, side='BUY', type='MARKET', quantity=abs(amt))
+                    print(f"⚠️ CIERRE SHORT: {razon} | ADX: {adx_val:.1f}")
 
-            elif amt > 0 and precio < ema_20: # Giro a Short
-                client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=abs(amt))
-                client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=cantidad_prueba)
-                print(f"🔄 GIRO: Precio {precio} cayó de EMA 20. Pasando a SHORT.")
+            # 3. SI ESTAMOS EN LONG
+            elif amt > 0:
+                # Cierre por cruce de EMA o porque la tendencia se murió (ADX débil)
+                if precio < (ema_20 * 0.999) or adx_debil:
+                    razon = "Giro EMA" if precio < ema_20 else "ADX Débil (Asegurando)"
+                    client.futures_create_order(symbol=symbol, side='SELL', type='MARKET', quantity=abs(amt))
+                    print(f"⚠️ CIERRE LONG: {razon} | ADX: {adx_val:.1f}")
 
-            print(f"📊 MONITOR: SOL {precio} | EMA20 {ema_20:.2f} | ADX {adx_val:.1f}")
+            print(f"📊 MONITOR: SOL {precio:.2f} | EMA20 {ema_20:.2f} | ADX {adx_val:.1f}")
             time.sleep(10)
 
         except Exception as e:
@@ -71,4 +81,4 @@ def ejecutar_gladiador_sol():
             time.sleep(10)
 
 if __name__ == "__main__":
-    ejecutar_gladiador_sol()
+    ejecutar_gladiador_inteligente()
