@@ -1,68 +1,46 @@
 import time
 import os
 
-# === CONFIGURACIÓN DE INGENIERÍA ALE IA QUANTUM ===
-CAPITAL_INICIAL = 0.80         # Tus 80 centavos
-PALANCA = 10                   # x10
-COMPUESTO_FACTOR = 0.20        # 20% reinversión
-STOP_EMERGENCIA = -0.8         # SI ENTRA MAL, CIERRA AQUÍ
-VELA_TIEMPO = 60               # 1 Minuto
+# CONFIGURACIÓN ALE IA QUANTUM
+ENTRADA = 0.80
+PALANCA = 10
+STOP_EMERGENCIA = -0.8  # Cierra si entra mal
+COMPUESTO = 0.20
 
-def iniciar_programa():
-    saldo_actual = CAPITAL_INICIAL
-    contador_velas = 0
-    picos = 0
-    
-    print("🔱 INICIANDO ALE IA QUANTUM - MÓDULO DE PROTECCIÓN ACTIVO")
-    print(f"📊 ADN 4 AÑOS CARGADO | CIERRE POR ERROR A {STOP_EMERGENCIA}%")
+def programa_principal():
+    saldo = ENTRADA
+    vela = 0
+    # CREAR EL ARCHIVO TXT SI NO EXISTE
+    if not os.path.exists("analisis_ale.txt"):
+        with open("analisis_ale.txt", "w") as f:
+            f.write("--- INICIO DE INGENIERÍA SOL ---\n")
+
+    print("🔱 PROGRAMA ACTIVO - ESPERANDO ADN 4 AÑOS")
 
     while True:
-        try:
-            # --- SIMULACIÓN DE MERCADO (1 MINUTO) ---
-            # Aquí el ADN de 4 años mide el movimiento actual
-            roi_mercado = -0.85  # EJEMPLO: El mercado se fue en contra
-            
-            # --- CÁLCULO FINANCIERO ---
-            volumen = saldo_actual * PALANCA
-            comision = volumen * 0.002
-            ganancia_neta = (volumen * (roi_mercado / 100)) - comision
-            
-            # --- LÓGICA DE CIERRE (SI ENTRA MAL) ---
-            estado_operacion = "ANALIZANDO"
-            if roi_mercado <= STOP_EMERGENCIA:
-                estado_operacion = "🚨 CIERRE POR ERROR (PROTECCIÓN)"
-                # Aquí restamos la pérdida al capital para la próxima
-                saldo_actual += ganancia_neta # ganancia_neta es negativa aquí
-            elif roi_mercado > 0:
-                estado_operacion = "✅ OPERACIÓN EXITOSA"
-                # Sumamos el 20% de la ganancia neta
-                saldo_actual += (ganancia_neta * COMPUESTO_FACTOR)
-            
-            contador_velas += 1
+        # Simulamos lectura de mercado (Aquí va tu ADN)
+        roi = 0.5 # Ejemplo de ROI
+        
+        # Lógica de Finanzas y Cierre
+        volumen = saldo * PALANCA
+        ganancia_neta = (volumen * (roi / 100)) - (volumen * 0.002)
+        
+        status = "OPERANDO"
+        if roi <= STOP_EMERGENCIA:
+            status = "🚨 CIERRE POR ERROR"
+            saldo += ganancia_neta # Resta la pérdida
+        elif roi > 0:
+            status = "✅ GANANCIA"
+            saldo += (ganancia_neta * COMPUESTO)
 
-            # === VOLCADO AL TXT (CONTABILIDAD COMPLETA) ===
-            with open("analisis_ale.txt", "a") as f:
-                f.write(f"\n--- REPORTE QUANTUM [{time.strftime('%H:%M:%S')}] ---")
-                f.write(f"\n⚙️ ESTADO: {estado_operacion}")
-                f.write(f"\n🕯️ VELA: {contador_velas} | ADN Validado: OK")
-                f.write(f"\n💵 CAPITAL ENTRADA: ${saldo_actual:.4f}")
-                f.write(f"\n📈 ROI MERCADO: {roi_mercado}% | PALANCA: x10")
-                f.write(f"\n💰 RESULTADO NETO: ${ganancia_neta:.4f}")
-                f.write(f"\n💎 SALDO TRAS COMPUESTO/STOP: ${saldo_actual:.4f}")
-                f.write(f"\n------------------------------------------------\n")
-
-            print(f"✅ Vela {contador_velas} procesada. Estado: {estado_operacion}")
-            
-            # Si cerró por error, el bot espera una nueva señal del ADN para volver a entrar
-            if estado_operacion == "🚨 CIERRE POR ERROR (PROTECCIÓN)":
-                print("⚠️ Protegiendo capital. Esperando nueva ventana de oportunidad...")
-                time.sleep(300) # Espera 5 min para que el mercado se calme
-
-            time.sleep(VELA_TIEMPO)
-            
-        except Exception as e:
-            print(f"⚠️ Error: {e}")
-            time.sleep(10)
+        vela += 1
+        
+        # ESCRIBIR AL TXT
+        with open("analisis_ale.txt", "a") as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] VELA: {vela} | STATUS: {status} | SALDO: ${saldo:.4f}\n")
+        
+        print(f"✅ Vela {vela} escrita en TXT. Saldo: ${saldo:.4f}")
+        time.sleep(60)
 
 if __name__ == "__main__":
-    iniciar_programa()
+    programa_principal()
