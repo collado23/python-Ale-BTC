@@ -1,76 +1,84 @@
 import time
 import os
 
-# === CONFIGURACIÓN MAESTRA ALE IA QUANTUM ===
-ENTRADA = 0.80           
+# === CONFIGURACIÓN MAESTRA ===
+ENTRADA_BASE = 0.80      
 PALANCA = 10             
 COMPUESTO = 0.20         
 STOP_EMERGENCIA = -0.8   
 MEDIA_200 = 145.20       
- 
-def ejecutar_quantum():
-    saldo_actual = ENTRADA
-    vela_num = 0
-    picos = 0
+
+# Colores para la pantalla de Railway
+VERDE = '\033[92m'
+ROJO = '\033[91m'
+AMARILLO = '\033[93m'
+CYAN = '\033[96m'
+RESET = '\033[0m'
+
+def iniciar_quantum():
+    saldo = ENTRADA_BASE
+    vela_count = 0
     archivo_log = "analisis_ale.txt"
     
-    # Encabezado inicial en consola
-    print("📡 Extrayendo ADN de Solana de los últimos 4 años...")
-    print("🔱 Iniciando Ingeniería de Inercia y ADX...")
+    print(f"{CYAN}📡 Extrayendo ADN de Solana de los últimos 4 años...{RESET}")
+    print(f"{CYAN}🔱 Iniciando Ingeniería de Inercia y ADX...{RESET}")
 
     while True:
         try:
-            # --- CRONÓMETRO DE VELA JAPONESA (FÍSICA DE 60s) ---
+            # --- FÍSICA DE VELA JAPONESA (60s) ---
             for s in range(60, 0, -1):
                 if s % 15 == 0: 
-                    print(f"⏳ Vela en desarrollo... {s}s restantes")
+                    print(f"⏳ Vela en desarrollo... {AMARILLO}{s}s restantes{RESET}")
                 time.sleep(1)
 
-            # --- CÁLCULOS DE INGENIERÍA REAL ---
-            precio_sol = 87.67      # Ejemplo de precio
-            precio_btc = 98500.0    # Referencia BTC
-            adx_fuerza = 24.5       # Medidor de inercia
-            match_adn = 98.2        # Tu ADN de 4 años
-            roi_actual = 0.18       # El ROI de la vela
-            distancia_200 = precio_sol - MEDIA_200
+            # --- CÁLCULOS DEL ADN DE 4 AÑOS (SIMULACIÓN FOTO 2) ---
+            precio_sol = 87.67      
+            adx_fuerza = 24.5       
+            match_adn = 98.2        
+            roi_actual = 0.18       # Cambiá esto a negativo para probar el Rojo
+            distancia_btc = -0.00   
             
-            # Lógica de Picos e Inercia
-            if adx_fuerza < 25:
-                picos = (picos + 1) if picos < 3 else 1
-                status = "⚖️ ELÁSTICO EN TENSIÓN"
-            else:
-                status = "🚀 IMPULSO DE INERCIA"
-
-            # Finanzas x10
-            volumen = saldo_actual * PALANCA
+            volumen = saldo * PALANCA
             ganancia_neta = (volumen * (roi_actual / 100)) - (volumen * 0.002)
             
-            # Aplicar compuesto si hay ganancia
-            if roi_actual > 0:
-                saldo_actual += (ganancia_neta * COMPUESTO)
+            # Definir color según el ROI
+            color_roi = VERDE if roi_actual >= 0 else ROJO
+            status = "⚖️ ELÁSTICO EN TENSIÓN" if adx_fuerza < 25 else "🚀 IMPULSO"
 
-            vela_num += 1
+            # === FORMATO DE REPORTE (IDÉNTICO A FOTO 2) ===
+            cuerpo_reporte = (
+                f"\n=============================================="
+                f"\n📡 ADN SOLANA 4 AÑOS | MATCH: {match_adn}%"
+                f"\n=============================================="
+                f"\n💰 SESIÓN: +0.00% | PROM/TRADE: +0.00%"
+                f"\n📊 {status} | ROI ACTUAL: {color_roi}{roi_actual:+.2f}%{RESET}"
+                f"\n📈 SOL: {precio_sol} ({color_roi}{roi_actual:+.2f}%{RESET}) | BTC Dist: {distancia_btc:.2f}%"
+                f"\n=============================================="
+                f"\n🔍 FISICA: ADX {adx_fuerza} | INERCIA OK | MEDIA 200: {MEDIA_200}"
+                f"\n💵 CAPITAL: {VERDE}${saldo:.4f}{RESET} | NETO: {color_roi}${ganancia_neta:.4f}{RESET}"
+                f"\n==============================================\n"
+            )
 
-            # === REPORTE ESTILO "FOTO 2" (LO QUE VOS QUERÉS) ===
+            # 1. Escribir al TXT (Sin colores para que no se vea raro el archivo)
+            reporte_limpio = cuerpo_reporte.replace(VERDE, "").replace(ROJO, "").replace(AMARILLO, "").replace(CYAN, "").replace(RESET, "")
             with open(archivo_log, "a") as f:
-                f.write("\n==============================================")
-                f.write(f"\n📡 ADN SOLANA 4 AÑOS | MATCH: {match_adn}%")
-                f.write("\n==============================================")
-                f.write(f"\n💰 SESIÓN: +0.00% | PROMEDIO/TRADE: +0.00%")
-                f.write(f"\n📊 {status} | ROI ACTUAL: {roi_actual:+.2f}%")
-                f.write(f"\n📈 SOL: {precio_sol} ({roi_actual:+.2f}%) | BTC: ${precio_btc:.0f}")
-                f.write(f"\n📏 DIST. 200: {distancia_200:.4f} | PICOS: {picos}/3")
-                f.write("\n==============================================")
-                f.write(f"\n🔍 FISICA: ADX {adx_fuerza} | INERCIA OK")
-                f.write(f"\n💵 CAPITAL: ${saldo_actual:.4f} | NETO: ${ganancia_neta:.4f}")
-                f.write("\n==============================================\n")
+                f.write(reporte_limpio)
+            
+            # 2. Mostrar en pantalla con COLORES
+            print(cuerpo_reporte)
+            
+            # Aplicar interés compuesto
+            if roi_actual > 0:
+                saldo += (ganancia_neta * COMPUESTO)
+            elif roi_actual <= STOP_EMERGENCIA:
+                print(f"{ROJO}🚨 CIERRE DE EMERGENCIA APLICADO{RESET}")
+                saldo += ganancia_neta
 
-            # Confirmación en consola para que sepas que Railway no se trabó
-            print(f"✅ [VELA {vela_num}] Reporte ADN guardado en TXT.")
+            vela_count += 1
 
         except Exception as e:
-            print(f"❌ Error en el sistema: {e}")
+            print(f"{ROJO}❌ Error: {e}{RESET}")
             time.sleep(10)
 
 if __name__ == "__main__":
-    ejecutar_quantum()
+    iniciar_quantum()
