@@ -1,7 +1,7 @@
 import time
 import os
 
-# === INGENIERÍA ALE IA QUANTUM ===
+# === INGENIERÍA ALE IA QUANTUM === 
 ENTRADA = 0.80           # Tu capital de entrada
 PALANCA = 10             # x10
 COMPUESTO = 0.20         # 20% de interés compuesto
