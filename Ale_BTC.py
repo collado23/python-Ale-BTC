@@ -1,67 +1,61 @@
 import time
 
-# === CONFIGURACIÓN DE INGENIERÍA SOL 1 MINUTO (x10) === 
-CAPITAL_INICIAL = 10.0          # Tus $10 USD reales
-APALANCAMIENTO = 10             # x10
-INTERES_COMPUESTO_FACTOR = 0.20 # 20% para reinvertir
-STOP_SEGURIDAD = -0.8           # Tu stop de -0.8%
-COMISION_BINANCE = 0.001        # 0.1% de comisión
+# === CONFIGURACIÓN DE INGENIERÍA SOL (ENTRADA 80 CENTAVOS) ===
+CAPITAL_ENTRADA = 0.80         # Tu capital de entrada: 80 centavos
+APALANCAMIENTO = 10            # x10 (Movés $8 USD totales)
+INTERES_COMPUESTO_FACTOR = 0.20 # 20% de la ganancia se suma al capital
+STOP_EMERGENCIA = -0.8         # Tu stop de seguridad
+TIEMPO_VELA = 60               # Velas de 1 minuto
 
-# Variables de Seguimiento
-saldo_acumulado = CAPITAL_INICIAL
-contador_velas_bajada = 0
-contador_velas_subida_previa = 15 # Ajustable según el espejo que veas
-picos_detectados = 0
+# Variables de seguimiento
+capital_actualizado = CAPITAL_ENTRADA
+contador_velas = 0
 
-def calcular_resultado_plata(roi_mercado):
-    """Calcula la ganancia real en USD usando x10 y restando comisiones"""
-    poder_compra = saldo_acumulado * APALANCAMIENTO
-    ganancia_bruta = poder_compra * (roi_mercado / 100)
-    # Comisión de entrada y salida
-    comisiones = poder_compra * COMISION_BINANCE * 2
-    return ganancia_bruta - comisiones
-
-def ejecutar_ingenieria_sol():
-    global saldo_acumulado, contador_velas_bajada, picos_detectados
+def calcular_resultado_exacto(roi_mercado):
+    global capital_actualizado
     
-    print(f"🔱 --- MÓDULO SOL 1 MINUTO ACTIVADO (x10) ---")
-    print(f"💰 Capital Base: ${saldo_acumulado} | Inversión: ${saldo_acumulado*APALANCAMIENTO}")
+    # El volumen que movés en Binance es capital * palanca
+    volumen_operacion = capital_actualizado * APALANCAMIENTO
+    
+    # Ganancia bruta
+    ganancia_bruta = volumen_operacion * (roi_mercado / 100)
+    
+    # Comisiones (Binance cobra sobre el volumen de $8, aprox 0.016 USD)
+    comisiones = volumen_operacion * 0.002
+    
+    ganancia_neta = ganancia_bruta - comisiones
+    return ganancia_neta
 
+def ejecutar_sol_80cts():
+    global capital_actualizado, contador_velas
+    
+    print(f"🔱 --- INGENIERÍA SOL: ENTRADA ${CAPITAL_ENTRADA} USD (x10) ---")
+    
     while True:
-        # --- ENTRADA DE DATOS (Simulado para 1 min) ---
-        # Aquí el bot leería el precio de SOL cada 60 segundos
-        roi_mercado_actual = 0.95 # Ejemplo: movimiento de SOL del 0.95%
+        # --- SIMULACIÓN DE VELA (1 MINUTO) ---
+        roi_mercado = 1.0  # Supongamos que SOL sube 1%
         
-        # 1. CONTADOR DE VELAS (SIMETRÍA 1 MINUTO)
-        contador_velas_bajada += 1
+        resultado_plata = calcular_resultado_exacto(roi_mercado)
         
-        # 2. CÁLCULO DE GANANCIA EN PLATA
-        resultado_usd = calcular_resultado_plata(roi_mercado_actual)
+        # INTERÉS COMPUESTO: Sumamos el 20% de la ganancia a tus 80 centavos
+        if resultado_plata > 0:
+            capital_actualizado += (resultado_plata * INTERES_COMPUESTO_FACTOR)
+            
+        contador_velas += 1
         
-        # 3. INTERÉS COMPUESTO (Si hay ganancia, sumamos el 20% al capital base)
-        if resultado_usd > 0:
-            saldo_acumulado += (resultado_usd * INTERES_COMPUESTO_FACTOR)
-        
-        # --- VOLCADO AL TXT (ANÁLISIS DE PLATA Y ESPEJO) ---
-        with open("analisis_sol_1min.txt", "a") as f:
+        # --- VOLCADO AL TXT ---
+        with open("analisis_sol_80cts.txt", "a") as f:
             f.write(f"\n--- LOG SOL 1min [{time.strftime('%H:%M:%S')}] ---")
-            f.write(f"\n🕯️ Vela de 1 min: #{contador_velas_bajada} de {contador_velas_subida_previa}")
-            f.write(f"\n📈 ROI Mercado: {roi_mercado_actual}% (x10)")
-            f.write(f"\n💵 GANANCIA REAL: ${resultado_usd:.2f} USD")
-            f.write(f"\n💎 Capital Base Actualizado: ${saldo_acumulado:.4f} USD")
-            f.write(f"\n🔱 Picos detectados: {picos_detectados}/3")
+            f.write(f"\n💵 Capital de Entrada: ${capital_actualizado:.4f} USD")
+            f.write(f"\n🚀 Poder en Mercado (x10): ${(capital_actualizado * APALANCAMIENTO):.2f} USD")
+            f.write(f"\n📈 ROI Mercado: {roi_mercado}%")
+            f.write(f"\n💰 GANANCIA NETA: ${resultado_plata:.4f} USD")
+            f.write(f"\n🕯️ Vela: {contador_velas} | Estado: Analizando Espejo")
             f.write(f"\n--------------------------------------------\n")
 
-        # 4. LÓGICA DE SALIDA
-        if roi_mercado_actual <= STOP_SEGURIDAD:
-            print(f"🚨 STOP ALCANZADO: Perdimos centavos, protegiendo capital.")
-            break
-            
-        if contador_velas_bajada >= contador_velas_subida_previa:
-            print(f"🔱 ESPEJO COMPLETADO: Revisando salida en Ganancia.")
+        print(f"✅ Minuto {contador_velas}: Capital ahora es ${capital_actualizado:.4f}")
 
-        # ESPERA DE 60 SEGUNDOS (VELA DE 1 MINUTO)
-        time.sleep(60)
+        time.sleep(TIEMPO_VELA)
 
 if __name__ == "__main__":
-    ejecutar_ingenieria_sol()
+    ejecutar_sol_80cts()
