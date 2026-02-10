@@ -1,6 +1,6 @@
 import time
 
-# === CONFIGURACIÓN DE INGENIERÍA SOL (ENTRADA 80 CENTAVOS) ===
+# === CONFIGURACIÓN DE INGENIERÍA SOL (ENTRADA 80 CENTAVOS) === 
 CAPITAL_ENTRADA = 0.80         # Tu capital de entrada: 80 centavos
 APALANCAMIENTO = 10            # x10 (Movés $8 USD totales)
 INTERES_COMPUESTO_FACTOR = 0.20 # 20% de la ganancia se suma al capital
