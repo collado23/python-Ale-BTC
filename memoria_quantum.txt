@@ -1,0 +1,11 @@
+[CONFIG]
+Estrategia: Elástico 2%
+Palanca: x10
+Capital Inicial: 30.00
+Estado: Aprendiendo
+[INSTRUCCIONES]
+- Analizar compras, ventas y Bitcoin por separado.
+- No cambiar volumen si el programa no lo permite.
+- Interés compuesto: 20% si conviene aumentar.
+- Comisión Binance: 0.1% considerada.
+- Evitar repetición de errores en mismas operaciones.
