@@ -1,7 +1,7 @@
 import time
 import os
 
-# === CONFIGURACIÓN MAESTRA ===
+# === CONFIGURACIÓN MAESTRA === 
 ENTRADA_BASE = 0.80      
 PALANCA = 10             
 COMPUESTO = 0.20         
