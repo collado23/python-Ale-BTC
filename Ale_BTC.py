@@ -7,7 +7,7 @@ PALANCA = 10
 COMPUESTO = 0.20         
 STOP_EMERGENCIA = -0.8   
 MEDIA_200 = 145.20       
-
+ 
 def ejecutar_quantum():
     saldo_actual = ENTRADA
     vela_num = 0
