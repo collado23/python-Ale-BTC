@@ -1,75 +1,59 @@
 import time
-import os
 
-# === CONFIGURACIÓN DE ELÁSTICO Y PODER ===
-ENTRADA = 0.80
+# === CONFIGURACIÓN DE PODER Y BILLETERA ===
+CAPITAL_OPERATIVO = 30.00  # Tu capital real
+INTERES_COMPUESTO = 0.20   # 20% se reinvierte
 PALANCA = 10
+GANANCIA_NETA_ACUMULADA = 0.0
 MEDIA_200 = 145.20
-MIN_PROYECCION = 2.0  # Tu filtro del 2%
-STOP_INICIAL = -0.8
+STOP_DINAMICO = -0.8
 
-def ejecutar_quantum():
-    saldo = ENTRADA
-    vela_num = 0
-    stop_dinamico = STOP_INICIAL
-    operacion_activa = False
+def ejecutar_quantum_completo():
+    global CAPITAL_OPERATIVO, GANANCIA_NETA_ACUMULADA, STOP_DINAMICO
     
-    print("📡 Extrayendo ADN de Solana de los últimos 4 años...")
+    print(f"🚀 SISTEMA ACTIVADO | CAPITAL: ${CAPITAL_OPERATIVO} | MODO: SIMULACIÓN")
 
     while True:
-        try:
-            # --- CRONÓMETRO DE VELA JAPONESA (60s) ---
-            for s in range(60, 0, -1):
-                if s % 15 == 0: print(f"⏳ Vela en desarrollo... {s}s restantes")
-                time.sleep(1)
-
-            # --- CÁLCULOS DE INGENIERÍA (REALIDAD FÍSICA) ---
-            precio_sol = 87.67      
-            adx_fuerza = 26.8       
-            match_adn = 98.2        
-            distancia_200 = precio_sol - MEDIA_200
+        # --- (SIMULACIÓN DE DATOS EN TIEMPO REAL) ---
+        precio_sol = 87.67      
+        adx_fuerza = 26.8       
+        match_adn = 98.2        
+        distancia_200 = precio_sol - MEDIA_200
+        proyeccion_rebote = 2.45  # El bot ve un 2.45% de potencial
+        roi_actual = 1.80         # Supongamos que va ganando esto
+        
+        # --- LÓGICA DE INTERÉS COMPUESTO AL CERRAR ---
+        # Solo ocurre cuando la operación termina (ejemplo simbólico)
+        if roi_actual >= 2.0: 
+            ganancia_bruta = (CAPITAL_OPERATIVO * PALANCA) * (roi_actual / 100)
+            reinvierte = ganancia_bruta * INTERES_COMPUESTO
+            bolsillo = ganancia_bruta - reinvierte
             
-            # El bot proyecta cuánto puede ganar según el ADN
-            proyeccion_adn = abs(distancia_200 * 0.5) 
-            roi_actual = 0.45 if operacion_activa else 0.0 # Simulación de ROI
+            CAPITAL_OPERATIVO += reinvierte
+            GANANCIA_NETA_ACUMULADA += bolsillo
+            print(f"✅ OPERACIÓN CERRADA: Reinvertido ${reinvierte:.2f} | Ganado ${bolsillo:.2f}")
 
-            # --- LÓGICA DE GATILLO Y TRAILING ---
-            status = "🔍 ANALIZANDO"
-            if not operacion_activa:
-                if proyeccion_adn >= MIN_PROYECCION and adx_fuerza > 25:
-                    operacion_activa = True
-                    status = "🚀 ENTRADA: OBJETIVO > 2%"
-                else:
-                    status = "⚖️ ESPERANDO TENSIÓN"
-            else:
-                status = "🛡️ TRAILING ACTIVO"
-                # Si el ROI sube, el Stop lo persigue
-                nuevo_stop = roi_actual - 1.0 
-                if nuevo_stop > stop_dinamico:
-                    stop_dinamico = nuevo_stop
-
-            # --- EL REPORTE MAESTRO (TODO EN UNO) ---
-            with open("analisis_ale.txt", "a") as f:
-                reporte = (
-                    "\n=============================================="
-                    f"\n📡 ADN SOLANA 4 AÑOS | MATCH: {match_adn}%"
-                    "\n=============================================="
-                    f"\n📊 {status} | ROI ACTUAL: {roi_actual:+.2f}%"
-                    f"\n📈 SOL: {precio_sol} | DIST. 200: {distancia_200:.4f}"
-                    f"\n🎯 PROYEC. REBOTE: {proyeccion_adn:.2f}% | ADX: {adx_fuerza}"
-                    "\n----------------------------------------------"
-                    f"\n🛡️  STOP DINÁMICO: {stop_dinamico:+.2f}% | PICOS: 3/3"
-                    f"\n💵 CAPITAL: ${saldo:.4f} | NETO: ${(saldo * PALANCA * (roi_actual/100)):.4f}"
-                    "\n==============================================\n"
-                )
-                f.write(reporte)
-                print(reporte) # También lo ves en la consola de Railway
-
-            vela_num += 1
-
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            time.sleep(10)
+        # --- EL REPORTE MAESTRO (CON TODO LO QUE PEDISTE) ---
+        reporte = (
+            "\n=============================================="
+            f"\n📡 ADN SOLANA 4 AÑOS | MATCH: {match_adn}%"
+            "\n=============================================="
+            f"\n📊 STATUS: TRAILING ACTIVO | ROI: {roi_actual:+.2f}%"
+            f"\n📈 SOL: {precio_sol} | DIST. 200: {distancia_200:.4f}"
+            f"\n🎯 PROYEC. REBOTE: {proyeccion_rebote:.2f}% | ADX: {adx_fuerza}"
+            "\n----------------------------------------------"
+            f"\n🛡️  STOP DINÁMICO: {STOP_DINAMICO:+.2f}% | PICOS: 3/3"
+            f"\n💰 CAPITAL OPERATIVO: ${CAPITAL_OPERATIVO:.2f}"
+            f"\n💵 GANANCIA NETA TOTAL: ${GANANCIA_NETA_ACUMULADA:.2f}"
+            "\n==============================================\n"
+        )
+        
+        # Guardar en el archivo TXT para que lo veas en el gráfico
+        with open("analisis_ale.txt", "a") as f:
+            f.write(reporte)
+        
+        print(reporte)
+        time.sleep(60) # Actualiza cada minuto (vela japonesa)
 
 if __name__ == "__main__":
-    ejecutar_quantum()
+    ejecutar_quantum_completo()
