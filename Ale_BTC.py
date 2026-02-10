@@ -1,7 +1,7 @@
 import time
 import os
 
-# CONFIGURACIÓN ALE IA QUANTUM 
+# CONFIGURACIÓN ALE IA QUANTUM  
 ENTRADA = 0.80
 PALANCA = 10
 STOP_EMERGENCIA = -0.8  # Cierra si entra mal
