@@ -7,7 +7,7 @@ PALANCA = 10             # x10
 COMPUESTO = 0.20         # 20% de interés compuesto
 STOP_EMERGENCIA = -0.8   # Protección: cierra si el elástico falla
 
-def programa_principal():
+def programa_principal(): 
     saldo = ENTRADA
     vela = 0
     archivo_log = "analisis_ale.txt"
