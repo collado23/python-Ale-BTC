@@ -1,4 +1,4 @@
-import time
+import time 
 
 # === CONFIGURACIÓN DE PODER Y BILLETERA ===
 CAPITAL_OPERATIVO = 30.00  # Tu capital real
