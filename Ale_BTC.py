@@ -1,89 +1,80 @@
 import os, time
 import pandas as pd
-from binance.client import Client 
+from binance.client import Client
 
 def c():
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
-cap_actual = 24.17 # Capital para reiniciar recuperación
+cap_actual = 23.86 # Capital según el último log
 st = {m: {'o': 0, 'e': False, 'p': 0, 't': '', 'm': -9.0, 'b': False, 'h': []} for m in ms}
 
 def calcular_cerebro(df):
-    # Volvemos a la configuración estable de EMAs
-    df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
-    df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['ema_35'] = df['close'].ewm(span=35, adjust=False).mean()
-    df['rango'] = df['high'] - df['low']
-    # Z-Score de 20 velas para filtrar entradas tardías
-    df['z_score'] = (df['rango'] - df['rango'].rolling(20).mean()) / df['rango'].rolling(20).std()
+    df['ema_rápida'] = df['close'].ewm(span=7, adjust=False).mean()
+    df['ema_lenta'] = df['close'].ewm(span=25, adjust=False).mean()
+    # RSI para detectar si el precio ya cayó demasiado (agotamiento)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['rsi'] = 100 - (100 / (1 + rs))
     return df
 
-def ni(df):
+def detectar_giro_real(df):
     act = df.iloc[-1]; prev = df.iloc[-2]
-    cuerpo = abs(act['close'] - act['open']) or 0.001
-    l_ok = (act['close'] > act['ema_200']) and (act['ema_35'] > act['ema_50'])
-    s_ok = (act['close'] < act['ema_200']) and (act['ema_35'] < act['ema_50'])
     
-    # LONG (Martillo o Rompe Techo)
-    m_inf = act['open'] - act['low'] if act['close'] > act['open'] else act['close'] - act['low']
-    if l_ok and (m_inf > cuerpo * 3.2) and (act['close'] > act['open']): return "🔨"
-    if l_ok and (act['close'] > prev['high']) and (act['z_score'] < 1.7): return "V"
+    # Lógica para detectar el despegue tras la bajada (LONG)
+    # 1. El RSI debe estar saliendo de la zona baja (despegue)
+    # 2. La vela actual debe ser verde y cerrar por encima de la media
+    despegue_verde = act['close'] > act['open'] and act['close'] > act['ema_rápida'] and prev['rsi'] < 40
     
-    # SHORT (Estrella o Rompe Suelo)
-    m_sup = act['high'] - act['close'] if act['close'] > act['open'] else act['high'] - act['open']
-    if s_ok and (m_sup > cuerpo * 2.8) and (act['close'] < act['open']): return "☄️"
-    if s_ok and (act['close'] < prev['low']) and (act['z_score'] < 1.9): return "R"
+    # Lógica para evitar el SHORT en el piso
+    # Si el RSI es muy bajo (< 30), prohibido vender, porque viene el rebote
+    caida_agotada = act['rsi'] < 30
+
+    if despegue_verde: return "🟩"
+    if (act['close'] < act['open'] and act['close'] < act['ema_rápida']) and not caida_agotada:
+        return "🟥"
+        
     return "."
 
-print(f"🔱 REGRESO AL MODO EQUILIBRIO | CAP: ${cap_actual} | SL: -0.30%")
+print(f"🔱 IA QUANTUM: FILTRO DE AGOTAMIENTO | CAP: ${cap_actual}")
 
 while True:
     try:
         for m in ms:
             s = st[m]
-            k = cl.get_klines(symbol=m, interval='1m', limit=201)
+            k = cl.get_klines(symbol=m, interval='1m', limit=100)
             df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
             df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
             df = calcular_cerebro(df)
             px = df['close'].iloc[-1]
-            ptr = ni(df)
+            senal = detectar_giro_real(df)
 
             if not s['e']:
-                if ptr != ".":
-                    s['t'] = "LONG" if ptr in ["🔨", "V"] else "SHORT"
+                if senal != ".":
+                    s['t'] = "LONG" if senal == "🟩" else "SHORT"
                     s['p'], s['e'], s['m'], s['b'] = px, True, -9.0, False
-                    print(f"\n🎯 ENTRADA {m} {s['t']} ({ptr})")
+                    print(f"\n🎯 {senal} CAMBIO DETECTADO EN {m} | PX: {px}")
             else:
+                # GESTIÓN PARA CERO PÉRDIDAS
                 df_p = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
                 roi = (df_p * 100 * 10) - 0.22 
                 if roi > s['m']: s['m'] = roi
                 
-                # --- GESTIÓN MATEMÁTICA ---
-                # 1. Blindaje al 0.10%: Protege capital rápido
-                if roi >= 0.10: s['b'] = True 
-                
-                # 2. Trailing Stop: Solo busca cerrar si ya hay ganancia real (>0.35%)
-                dist = 0.10 if s['t'] == "SHORT" else 0.14
-                t_stop = (roi <= (s['m'] - dist)) if s['m'] >= 0.35 else False
-                
-                # 3. Stop Loss Fijo y Estricto (Tu pedido: poca pérdida)
-                sl_estricto = roi <= -0.30
+                # Salida por "Rebote de Seguridad"
+                # Si estamos en LONG y la vela actual pierde fuerza, cerramos.
+                v_act = df.iloc[-1]
+                perdio_fuerza = (s['t'] == "LONG" and px < v_act['open']) or (s['t'] == "SHORT" and px > v_act['open'])
 
-                if (s['b'] and roi <= 0.01) or t_stop or sl_estricto:
+                if roi <= -0.20 or (roi > 0.10 and roi < s['m'] - 0.08) or perdio_fuerza:
                     gan = (cap_actual * (roi / 100))
                     cap_actual += gan
                     s['o'] += 1; s['e'] = False
                     est = "✅" if roi > 0 else "❌"
-                    s['h'].append(f"{est} {s['t']} {roi:.2f}%")
                     print(f"\n{est} SALIDA {m} {roi:.2f}% | NETO: ${cap_actual:.2f}")
 
-                    if s['o'] % 5 == 0:
-                        print(f"\n╔{'═'*32}╗\n║ 📊 REPORTE 5 OPS - {m[:3]} ║")
-                        for line in s['h']: print(f"║ {line.ljust(28)} ║")
-                        print(f"╠{'═'*32}╣\n║ CAP FINAL: ${cap_actual:.2f}   ║\n╚{'═'*32}╝\n")
-                        s['h'] = []
         time.sleep(15)
     except:
         time.sleep(10); cl = c()
