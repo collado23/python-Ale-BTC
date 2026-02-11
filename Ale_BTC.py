@@ -6,99 +6,95 @@ from binance.client import Client
 # === CONEXIÓN ===
 client = Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
-# === MEMORIA REAL (Actualizada a tu última foto) ===
-archivo_memoria = "memoria_quantum.txt"
+# === CONFIGURACIÓN DE RESETEO ($30) ===
 cap_inicial = 30.00
-ganado_plata = 47.37   
-perdido_plata = 67.66  
-ops_ganadas = 189      
-ops_perdidas = 217     
-ops_totales = ops_ganadas + ops_perdidas
+ganado = 0.00
+perdido = 0.00
+ops_ganadas = 0
+ops_perdidas = 0
+ops_totales = 0
 en_op = False
+lista_precios = [] # Para guardar el detalle de las 5 ops
 
-def guardar_historial(tipo, msg, valor=0):
-    global ops_totales, ganado_plata, perdido_plata, ops_ganadas, ops_perdidas
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    linea = f"{ts} | {tipo:10} | {msg} | VAL: ${valor:.4f} | OPS: {ops_totales}\n"
-    try:
-        with open(archivo_memoria, "a", encoding="utf-8") as f:
-            f.write(linea)
-            f.flush()
-    except: pass
-    if tipo == "CIERRE":
-        ops_totales += 1
-        if valor > 0:
-            ganado_plata += valor
-            ops_ganadas += 1
-        else:
-            perdido_plata += abs(valor)
-            ops_perdidas += 1
+def mostrar_reporte_pantalla():
+    """Muestra el reporte visual para la captura de pantalla del celular"""
+    global lista_precios
+    ts = datetime.now().strftime('%H:%M:%S')
+    neto = ganado - perdido
+    
+    print("\n" + "█"*50)
+    print(f"📥 REPORTE PARA CAPTURA | {ts}")
+    print("█" + " " * 48 + "█")
+    print(f"  🔢 OPERACIONES TOTALES: {ops_totales}")
+    print(f"  ✅ GANADAS: {ops_ganadas} (+${ganado:.4f})")
+    print(f"  ❌ PERDIDAS: {ops_perdidas} (-${perdido:.4f})")
+    print(f"  💰 BALANCE NETO: ${neto:.4f}")
+    print(f"  💵 CAPITAL FINAL: ${cap_inicial + neto:.2f}")
+    print("█" + " " * 48 + "█")
+    print("  📝 DETALLE DE LAS ÚLTIMAS 5:")
+    for p in lista_precios:
+        print(f"  • {p}")
+    print("█"*50 + "\n")
+    
+    # Limpiamos la lista para las próximas 5
+    lista_precios = []
 
-print(f"🚀 MODO SNIPER: 2 VELAS + ELASTICIDAD ACTIVADO")
+def registrar_evento(tipo_cierre, roi_n, res_plata, t_op, p_entrada, p_salida):
+    global ops_totales, ganado, perdido, ops_ganadas, ops_perdidas, lista_precios
+    
+    ops_totales += 1
+    simbolo = "✅" if res_plata > 0 else "❌"
+    
+    # Guardamos el detalle para el reporte
+    detalle = f"{simbolo} {t_op} | ROI: {roi_n:.2f}% | ${res_plata:.4f}"
+    lista_precios.append(detalle)
+
+    if res_plata > 0:
+        ganado += res_plata
+        ops_ganadas += 1
+    else:
+        perdido += abs(res_plata)
+        ops_perdidas += 1
+    
+    # Cada 5 operaciones, mostramos el cuadro para la foto
+    if ops_totales % 5 == 0:
+        mostrar_reporte_pantalla()
+
+print(f"🚀 AMETRALLADORA INICIADA - REPORTE VISUAL CADA 5 OPS")
 
 while ops_totales < 1000:
     try:
-        # 1. ANÁLISIS DE LAS ÚLTIMAS 2 VELAS
         ticker = client.get_symbol_ticker(symbol="SOLUSDT")
         sol = float(ticker['price'])
         klines = client.get_klines(symbol='SOLUSDT', interval=Client.KLINE_INTERVAL_1MINUTE, limit=5)
         
-        # Color de las últimas 2 velas cerradas
         def get_color(k): return "VERDE 🟢" if float(k[4]) > float(k[1]) else "ROJA 🔴"
-        v1 = get_color(klines[-2]) # La que acaba de cerrar
-        v2 = get_color(klines[-3]) # La anterior
+        v1, v2 = get_color(klines[-2]), get_color(klines[-3])
         
-        # Elasticidad (Media de 20 períodos)
-        klines_ema = client.get_klines(symbol='SOLUSDT', interval=Client.KLINE_INTERVAL_1MINUTE, limit=20)
-        cierres = [float(k[4]) for k in klines_ema]
-        ema = sum(cierres) / 20
+        # Elasticidad disparo rápido
+        klines_ema = client.get_klines(symbol='SOLUSDT', interval=Client.KLINE_INTERVAL_1MINUTE, limit=10)
+        ema = sum([float(k[4]) for k in klines_ema]) / 10
         elasticidad = abs(((ema - sol) / sol) * 100)
         
-        neto = ganado_plata - perdido_plata
-
-        # --- 📊 TABLERO PARA FOTO CELULAR ---
-        print("\n" + "═"*50)
-        print(f"🔱 ALE IA QUANTUM | {datetime.now().strftime('%H:%M:%S')}")
-        print(f"🔢 OPS: {ops_totales} / 1000 | 💰 NETO: ${neto:.2f}")
-        print(f"✅ G: {ops_ganadas} (+${ganado_plata:.2f})")
-        print(f"❌ P: {ops_perdidas} (-${perdido_plata:.2f})")
-        print("-" * 50)
-        print(f"🕯️ RACHA 2V: [{v2}] -> [{v1}]") 
-        print(f"📏 ELASTICIDAD: {elasticidad:.3f}% | 📈 SOL: ${sol:.2f}")
+        if not en_op:
+            # Tablero de espera (más simple para no ensuciar)
+            print(f"⏱️ Ops: {ops_totales} | SOL: ${sol} | Dist: {elasticidad:.3f}% | Velas: {v2}+{v1}", end='\r')
+            
+            if v1 == v2 and elasticidad >= 0.015:
+                p_ent, en_op, max_roi = sol, True, -99.0
+                t_op = "SHORT 🔴" if "VERDE" in v1 else "LONG 🟢"
         
-        if en_op:
+        else:
             diff = ((sol - p_ent) / p_ent) if "LONG" in t_op else ((p_ent - sol) / p_ent)
             roi_neto = (diff * 100 * 10) - 0.20
             if roi_neto > max_roi: max_roi = roi_neto
-            print(f"🏃 {t_op} | ROI NETO: {roi_neto:.2f}% | PISO: {max_roi - 0.10:.2f}%")
-        print("═"*50)
-
-        # 2. GATILLO: SI LAS 2 SON IGUALES + ELASTICIDAD
-        if not en_op:
-            if v1 == v2 and elasticidad >= 0.045:
-                p_ent = sol
-                en_op = True
-                max_roi = -99.0
-                # Lógica Invertida (Espejo)
-                if "VERDE" in v1:
-                    t_op = "SHORT 🔴"
-                    guardar_historial("VENTA", f"SHORT 2V en ${sol}")
-                else:
-                    t_op = "LONG 🟢"
-                    guardar_historial("COMPRA", f"LONG 2V en ${sol}")
-        
-        else:
-            # 3. CIERRE POR TRAILING (Asegura el centavo neto)
-            if max_roi >= 0.35:
-                if roi_neto <= (max_roi - 0.10):
-                    res = (9.85 * (roi_neto / 100)) # Operando sobre capital real
-                    guardar_historial("CIERRE", f"{t_op} TRAIL", res)
-                    en_op = False
-            elif roi_neto <= -0.70:
-                res = (9.85 * (roi_neto / 100))
-                guardar_historial("CIERRE", f"{t_op} STOP", res)
+            
+            # Cierre rápido
+            if (max_roi >= 0.30 and roi_neto <= (max_roi - 0.10)) or roi_neto <= -0.65:
+                res = (30.0 * (roi_neto / 100))
+                registrar_evento("CIERRE", roi_neto, res, t_op, p_ent, sol)
                 en_op = False
 
-        time.sleep(15)
-    except Exception as e:
         time.sleep(10)
+    except Exception as e:
+        time.sleep(5)
