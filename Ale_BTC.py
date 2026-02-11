@@ -2,99 +2,65 @@ import os, time
 from datetime import datetime
 from binance.client import Client
 
-# === CONEXIÓN DIRECTA ===
-def conectar():
+# CONEXIÓN DIRECTA
+def c():
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
-client = conectar()
+cl = c()
+# MONEDAS SELECCIONADAS: SOL, ETH, BNB
+ms = ['SOLUSDT', 'ETHUSDT', 'BNBUSDT']
+st = {m: {'n': 0.0, 'o': 0, 'e': False, 'p': 0, 't': '', 'm': -9.0, 'b': False} for m in ms}
 
-# === CONFIGURACIÓN $30.76 ===
-cap_base = 30.76
-ganado, perdido = 0.0, 0.0
-ops_ganadas, ops_perdidas, ops_totales = 0, 0, 0
-en_op = False
-historial_bloque = []
-
-def libro_nison_blindado(k1, k2):
-    """Matemática de Nison: Filtro 2.5x"""
-    op, hi, lo, cl = float(k1[1]), float(k1[2]), float(k1[3]), float(k1[4])
-    cuerpo = abs(cl - op) if abs(cl - op) > 0 else 0.001
-    m_inf, m_sup = min(op, cl) - lo, hi - max(op, cl)
-    
+def ni(k1, k2):
+    o, h, l, c_ = float(k1[1]), float(k1[2]), float(k1[3]), float(k1[4])
+    cp = abs(c_ - o) if abs(c_ - o) > 0 else 0.001
+    mi, ms_ = min(o, c_) - l, h - max(o, c_)
     op_p, cl_p = float(k2[1]), float(k2[4])
-    cuerpo_p = abs(cl_p - op_p)
+    cp_p = abs(cl_p - op_p)
+    # PATRONES NISON 2.5x (Agresivos)
+    if mi > (cp * 2.5) and ms_ < (cp * 0.7): return "🔨" # Martillo
+    if ms_ > (cp * 2.5) and mi < (cp * 0.7): return "☄️" # Estrella
+    if c_ > o and cl_p < op_p and cp > (cp_p * 1.1): return "V" # Env. Verde
+    if c_ < o and cl_p > op_p and cp > (cp_p * 1.1): return "R" # Env. Roja
+    return "."
 
-    # SEÑALES LONG
-    if m_inf > (cuerpo * 2.5) and m_sup < (cuerpo * 0.7): return "MARTILLO 🔨"
-    if cl > op and cl_p < op_p and cuerpo > (cuerpo_p * 1.1): return "ENVOLVENTE_V 🌊"
-
-    # SEÑALES SHORT
-    if m_sup > (cuerpo * 2.5) and m_inf < (cuerpo * 0.7): return "ESTRELLA ☄️"
-    if cl < op and cl_p > op_p and cuerpo > (cuerpo_p * 1.1): return "ENVOLVENTE_R 🌊"
-
-    return "Normal"
-
-def mostrar_reporte():
-    global historial_bloque
-    neto = ganado - perdido
-    print(f"\n╔{'═'*55}╗")
-    print(f"║ 🔱 REPORTE BLINDADO | {datetime.now().strftime('%H:%M:%S')}          ║")
-    print(f"║ TOTAL: {ops_totales} | ✅ G: {ops_ganadas} | ❌ P: {ops_perdidas} | 💰 NETO: ${neto:.4f}  ║")
-    print(f"╠{'═'*55}╣")
-    for h in historial_bloque: print(f"║ • {h:<51} ║")
-    print(f"╚{'═'*55}╝\n")
-    historial_bloque.clear()
-
-print("🚀 SNIPER CARGADO - PROTECCIÓN 0.18% - SINCRO 15s")
+print("🚀 AMETRALLADORA UNIFICADA: SOL | ETH | BNB")
 
 while True:
     try:
-        ticker = client.get_symbol_ticker(symbol="SOLUSDT")
-        sol = float(ticker['price'])
-        k = client.get_klines(symbol='SOLUSDT', interval='1m', limit=3)
-        
-        patron = libro_nison_blindado(k[-1], k[-2])
-        precio_cierre_v1 = float(k[-1][4])
+        for m in ms:
+            s = st[m]
+            px = float(cl.get_symbol_ticker(symbol=m)['price'])
+            k = cl.get_klines(symbol=m, interval='1m', limit=3)
+            p = ni(k[-1], k[-2])
+            cr = float(k[-1][4])
 
-        if not en_op:
-            print(f"📡 SCAN: {patron} | SOL: {sol} | {datetime.now().strftime('%S')}s", end='\r')
-            
-            # GATILLOS
-            if ("MARTILLO" in patron or "ENVOLVENTE_V" in patron) and sol > precio_cierre_v1:
-                p_ent, en_op, t_op, p_al_entrar = sol, True, "LONG", patron
-                max_roi, break_even_listo = -99.0, False
-                print(f"\n🔥 ENTRADA: {t_op} | {p_al_entrar} a {p_ent}")
-            
-            elif ("ESTRELLA" in patron or "ENVOLVENTE_R" in patron) and sol < precio_cierre_v1:
-                p_ent, en_op, t_op, p_al_entrar = sol, True, "SHORT", patron
-                max_roi, break_even_listo = -99.0, False
-                print(f"\n🔥 ENTRADA: {t_op} | {p_al_entrar} a {p_ent}")
-        
-        else:
-            diff = (sol - p_ent) / p_ent if t_op == "LONG" else (p_ent - sol) / p_ent
-            roi = (diff * 100 * 10) - 0.22 
-            if roi > max_roi: max_roi = roi
-            
-            # BREAK EVEN ULTRA-RÁPIDO (Cuidar el capital)
-            if roi >= 0.18: 
-                break_even_listo = True
-            
-            if break_even_listo and roi <= 0.01:
-                res, motivo = (cap_base * (roi / 100)), "🛡️ BREAK EVEN (BLINDADO)"
-                en_op = False
-            elif (max_roi >= 0.40 and roi <= (max_roi - 0.12)) or roi <= -0.55:
-                res, motivo = (cap_base * (roi / 100)), p_al_entrar
-                en_op = False
+            if not s['e']:
+                print(f"{m[:2]}:{p}", end=' ')
+                # Gatillos rápidos
+                if (("🔨" in p or "V" in p) and px > cr) or (("☄️" in p or "R" in p) and px < cr):
+                    s['t'] = "LONG" if "V" in p or "🔨" in p else "SHORT"
+                    s['p'], s['e'], s['m'], s['b'] = px, True, -9.0, False
+                    print(f"\n🔥 ENTRADA {m}: {s['t']} a {px}")
+            else:
+                # Cálculo de ROI con apalancamiento x10
+                df = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
+                roi = (df * 100 * 10) - 0.22
+                if roi > s['m']: s['m'] = roi
+                if roi >= 0.18: s['b'] = True # Escudo Break Even
                 
-            if not en_op:
-                ops_totales += 1
-                if res > 0: ganado += res; ops_ganadas += 1; ico = "✅"
-                else: perdido += abs(res); ops_perdidas += 1; ico = "❌"
-                historial_bloque.append(f"{ico} {t_op} {roi:>5.2f}% | {motivo}")
-                if ops_totales % 5 == 0: mostrar_reporte()
+                # Lógica de Cierre
+                if (s['b'] and roi <= 0.01) or (s['m'] >= 0.40 and roi <= (s['m'] - 0.12)) or roi <= -0.55:
+                    res = (30.76 * (roi / 100))
+                    s['n'] += res
+                    s['o'] += 1
+                    s['e'] = False
+                    print(f"\n✅ CIERRE {m}: {roi:.2f}% | NETO: ${s['n']:.4f}")
+                    
+                    if s['o'] % 5 == 0:
+                        print(f"\n╔{'═'*30}╗\n║ 📊 REPORTE 5 OPS {m[:3]} ║\n║ NETO ACUM: ${s['n']:.4f} ║\n╚{'═'*30}╝")
 
-        time.sleep(15)
-
-    except Exception as e:
+        time.sleep(15) # Sincronización cada 15 seg
+    except Exception:
         time.sleep(10)
-        client = conectar()
+        cl = c()
