@@ -7,78 +7,82 @@ def c():
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
-# Capital actualizado tras el último desastre en los logs
-cap_actual = 24.17 
+cap_actual = 24.17 # Capital para reiniciar recuperación
 st = {m: {'o': 0, 'e': False, 'p': 0, 't': '', 'm': -9.0, 'b': False, 'h': []} for m in ms}
 
 def calcular_cerebro(df):
-    df['ema_rápida'] = df['close'].ewm(span=7, adjust=False).mean()
-    df['cuerpo'] = df['close'] - df['open']
+    # Volvemos a la configuración estable de EMAs
+    df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
+    df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema_35'] = df['close'].ewm(span=35, adjust=False).mean()
+    df['rango'] = df['high'] - df['low']
+    # Z-Score de 20 velas para filtrar entradas tardías
+    df['z_score'] = (df['rango'] - df['rango'].rolling(20).mean()) / df['rango'].rolling(20).std()
     return df
 
-def analizar_fuerza_real(df):
+def ni(df):
     act = df.iloc[-1]; prev = df.iloc[-2]
-    promedio_volatilidad = abs(df['cuerpo']).tail(30).mean()
+    cuerpo = abs(act['close'] - act['open']) or 0.001
+    l_ok = (act['close'] > act['ema_200']) and (act['ema_35'] > act['ema_50'])
+    s_ok = (act['close'] < act['ema_200']) and (act['ema_35'] < act['ema_50'])
     
-    # Solo entra si la vela tiene "nafta" (fuerza)
-    vela_con_fuerza = abs(act['cuerpo']) > (promedio_volatilidad * 1.3)
+    # LONG (Martillo o Rompe Techo)
+    m_inf = act['open'] - act['low'] if act['close'] > act['open'] else act['close'] - act['low']
+    if l_ok and (m_inf > cuerpo * 3.2) and (act['close'] > act['open']): return "🔨"
+    if l_ok and (act['close'] > prev['high']) and (act['z_score'] < 1.7): return "V"
     
-    # LONG: Verde + Fuerza + Rompe Techo anterior
-    if act['close'] > act['open'] and act['close'] > prev['high'] and vela_con_fuerza:
-        return "🟩"
-    # SHORT: Roja + Fuerza + Rompe Suelo anterior
-    if act['close'] < act['open'] and act['close'] < prev['low'] and vela_con_fuerza:
-        return "🟥"
+    # SHORT (Estrella o Rompe Suelo)
+    m_sup = act['high'] - act['close'] if act['close'] > act['open'] else act['high'] - act['open']
+    if s_ok and (m_sup > cuerpo * 2.8) and (act['close'] < act['open']): return "☄️"
+    if s_ok and (act['close'] < prev['low']) and (act['z_score'] < 1.9): return "R"
     return "."
 
-print(f"🔱 IA QUANTUM ANTIPÉRDIDA | CAP: ${cap_actual} | SALIDA INSTANTÁNEA")
+print(f"🔱 REGRESO AL MODO EQUILIBRIO | CAP: ${cap_actual} | SL: -0.30%")
 
 while True:
     try:
         for m in ms:
             s = st[m]
-            k = cl.get_klines(symbol=m, interval='1m', limit=50)
+            k = cl.get_klines(symbol=m, interval='1m', limit=201)
             df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
             df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
             df = calcular_cerebro(df)
             px = df['close'].iloc[-1]
-            senal = analizar_fuerza_real(df)
+            ptr = ni(df)
 
             if not s['e']:
-                if senal != ".":
-                    s['t'] = "LONG" if senal == "🟩" else "SHORT"
+                if ptr != ".":
+                    s['t'] = "LONG" if ptr in ["🔨", "V"] else "SHORT"
                     s['p'], s['e'], s['m'], s['b'] = px, True, -9.0, False
-                    print(f"\n🎯 {senal} DISPARO EN {m} | PX: {px}")
+                    print(f"\n🎯 ENTRADA {m} {s['t']} ({ptr})")
             else:
-                # --- GESTIÓN DE RIESGO RADICAL ---
                 df_p = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
                 roi = (df_p * 100 * 10) - 0.22 
                 if roi > s['m']: s['m'] = roi
                 
-                # CIERRE POR REBOTE O CAMBIO DE COLOR (Tu pedido)
-                # Si estamos en LONG y la vela actual es ROJA, salimos.
-                # Si estamos en SHORT y la vela actual es VERDE, salimos.
-                es_roja = df['close'].iloc[-1] < df['open'].iloc[-1]
-                es_verde = df['close'].iloc[-1] > df['open'].iloc[-1]
+                # --- GESTIÓN MATEMÁTICA ---
+                # 1. Blindaje al 0.10%: Protege capital rápido
+                if roi >= 0.10: s['b'] = True 
                 
-                cambio_fatal = (s['t'] == "LONG" and es_roja) or (s['t'] == "SHORT" and es_verde)
+                # 2. Trailing Stop: Solo busca cerrar si ya hay ganancia real (>0.35%)
+                dist = 0.10 if s['t'] == "SHORT" else 0.14
+                t_stop = (roi <= (s['m'] - dist)) if s['m'] >= 0.35 else False
                 
-                # Blindaje de ganancia mínima
-                if roi >= 0.05: s['b'] = True 
-                
-                # REGLA: Si hay cambio de color, o perdemos -0.15%, o baja 0.05 desde el máximo -> AFUERA
-                if cambio_fatal or roi <= -0.15 or (s['b'] and roi <= 0.01) or (roi > 0.15 and roi < s['m'] - 0.05):
+                # 3. Stop Loss Fijo y Estricto (Tu pedido: poca pérdida)
+                sl_estricto = roi <= -0.30
+
+                if (s['b'] and roi <= 0.01) or t_stop or sl_estricto:
                     gan = (cap_actual * (roi / 100))
                     cap_actual += gan
                     s['o'] += 1; s['e'] = False
                     est = "✅" if roi > 0 else "❌"
                     s['h'].append(f"{est} {s['t']} {roi:.2f}%")
-                    print(f"\n{est} OUT {m} {roi:.2f}% | CAP: ${cap_actual:.2f}")
+                    print(f"\n{est} SALIDA {m} {roi:.2f}% | NETO: ${cap_actual:.2f}")
 
                     if s['o'] % 5 == 0:
-                        print(f"\n╔{'═'*32}╗\n║ 📊 REPORTE PROTEGIDO - {m[:3]} ║")
+                        print(f"\n╔{'═'*32}╗\n║ 📊 REPORTE 5 OPS - {m[:3]} ║")
                         for line in s['h']: print(f"║ {line.ljust(28)} ║")
-                        print(f"╠{'═'*32}╣\n║ SALDO ACTUAL: ${cap_actual:.2f}    ║\n╚{'═'*32}╝\n")
+                        print(f"╠{'═'*32}╣\n║ CAP FINAL: ${cap_actual:.2f}   ║\n╚{'═'*32}╝\n")
                         s['h'] = []
         time.sleep(15)
     except:
