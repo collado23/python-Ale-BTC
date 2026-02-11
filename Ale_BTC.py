@@ -7,28 +7,31 @@ def c():
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
-cap_actual = 25.89 # Capital actualizado tras las pérdidas del log
+# Capital actualizado tras el último desastre en los logs
+cap_actual = 24.17 
 st = {m: {'o': 0, 'e': False, 'p': 0, 't': '', 'm': -9.0, 'b': False, 'h': []} for m in ms}
 
 def calcular_cerebro(df):
-    df['ema_fast'] = df['close'].ewm(span=7, adjust=False).mean() # Más rápida aún
+    df['ema_rápida'] = df['close'].ewm(span=7, adjust=False).mean()
     df['cuerpo'] = df['close'] - df['open']
     return df
 
-def analizar_entrada_segura(df):
+def analizar_fuerza_real(df):
     act = df.iloc[-1]; prev = df.iloc[-2]
+    promedio_volatilidad = abs(df['cuerpo']).tail(30).mean()
     
-    # LONG: Necesitamos vela verde, que cierre arriba de la anterior y arriba de la EMA
-    l_ok = act['close'] > act['open'] and act['close'] > prev['high'] and act['close'] > act['ema_fast']
+    # Solo entra si la vela tiene "nafta" (fuerza)
+    vela_con_fuerza = abs(act['cuerpo']) > (promedio_volatilidad * 1.3)
     
-    # SHORT: Necesitamos vela roja, que cierre abajo de la anterior y abajo de la EMA
-    s_ok = act['close'] < act['open'] and act['close'] < prev['low'] and act['close'] < act['ema_fast']
-    
-    if l_ok: return "🟩"
-    if s_ok: return "🟥"
+    # LONG: Verde + Fuerza + Rompe Techo anterior
+    if act['close'] > act['open'] and act['close'] > prev['high'] and vela_con_fuerza:
+        return "🟩"
+    # SHORT: Roja + Fuerza + Rompe Suelo anterior
+    if act['close'] < act['open'] and act['close'] < prev['low'] and vela_con_fuerza:
+        return "🟥"
     return "."
 
-print(f"🔱 IA QUANTUM 4.0 | CAP: ${cap_actual} | FILTRO DE INERCIA")
+print(f"🔱 IA QUANTUM ANTIPÉRDIDA | CAP: ${cap_actual} | SALIDA INSTANTÁNEA")
 
 while True:
     try:
@@ -39,41 +42,43 @@ while True:
             df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
             df = calcular_cerebro(df)
             px = df['close'].iloc[-1]
-            senal = analizar_entrada_segura(df)
+            senal = analizar_fuerza_real(df)
 
             if not s['e']:
                 if senal != ".":
                     s['t'] = "LONG" if senal == "🟩" else "SHORT"
                     s['p'], s['e'], s['m'], s['b'] = px, True, -9.0, False
-                    print(f"\n🎯 {senal} ENTRADA CONFIRMADA EN {m} | PX: {px}")
+                    print(f"\n🎯 {senal} DISPARO EN {m} | PX: {px}")
             else:
-                # GESTIÓN PARA NO PERDER
+                # --- GESTIÓN DE RIESGO RADICAL ---
                 df_p = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
                 roi = (df_p * 100 * 10) - 0.22 
                 if roi > s['m']: s['m'] = roi
                 
-                # CIERRE POR REBOTE DE VELA (Tu pedido de cerrar al rebote)
-                # Si el precio se mueve en contra de la dirección un 0.06%, cerramos ya.
-                act = df.iloc[-1]
-                rebote_long = s['t'] == "LONG" and px < df['low'].iloc[-1] + (df['cuerpo'].iloc[-1] * 0.2)
-                rebote_short = s['t'] == "SHORT" and px > df['high'].iloc[-1] - (abs(df['cuerpo'].iloc[-1]) * 0.2)
-
-                # Blindaje rápido
-                if roi >= 0.06: s['b'] = True 
+                # CIERRE POR REBOTE O CAMBIO DE COLOR (Tu pedido)
+                # Si estamos en LONG y la vela actual es ROJA, salimos.
+                # Si estamos en SHORT y la vela actual es VERDE, salimos.
+                es_roja = df['close'].iloc[-1] < df['open'].iloc[-1]
+                es_verde = df['close'].iloc[-1] > df['open'].iloc[-1]
                 
-                # Salida de emergencia
-                if (s['b'] and roi <= 0.01) or roi <= -0.18 or (roi > 0.20 and roi < s['m'] - 0.07):
+                cambio_fatal = (s['t'] == "LONG" and es_roja) or (s['t'] == "SHORT" and es_verde)
+                
+                # Blindaje de ganancia mínima
+                if roi >= 0.05: s['b'] = True 
+                
+                # REGLA: Si hay cambio de color, o perdemos -0.15%, o baja 0.05 desde el máximo -> AFUERA
+                if cambio_fatal or roi <= -0.15 or (s['b'] and roi <= 0.01) or (roi > 0.15 and roi < s['m'] - 0.05):
                     gan = (cap_actual * (roi / 100))
                     cap_actual += gan
                     s['o'] += 1; s['e'] = False
                     est = "✅" if roi > 0 else "❌"
                     s['h'].append(f"{est} {s['t']} {roi:.2f}%")
-                    print(f"\n{est} SALIDA {m} {roi:.2f}% | CAP: ${cap_actual:.2f}")
+                    print(f"\n{est} OUT {m} {roi:.2f}% | CAP: ${cap_actual:.2f}")
 
                     if s['o'] % 5 == 0:
-                        print(f"\n╔{'═'*32}╗\n║ 📊 REPORTE DE BLOQUE - {m[:3]} ║")
+                        print(f"\n╔{'═'*32}╗\n║ 📊 REPORTE PROTEGIDO - {m[:3]} ║")
                         for line in s['h']: print(f"║ {line.ljust(28)} ║")
-                        print(f"╠{'═'*32}╣\n║ CAP FINAL: ${cap_actual:.2f}   ║\n╚{'═'*32}╝\n")
+                        print(f"╠{'═'*32}╣\n║ SALDO ACTUAL: ${cap_actual:.2f}    ║\n╚{'═'*32}╝\n")
                         s['h'] = []
         time.sleep(15)
     except:
