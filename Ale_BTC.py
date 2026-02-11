@@ -3,28 +3,45 @@ import time
 from datetime import datetime
 from binance.client import Client
 
-# === INICIO SEGURO ===
+# === CONEXIÓN SEGURA ===
 def conectar():
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 client = conectar()
 
-# === MEMORIA (Basada en tus $30.76) ===
+# === CONFIGURACIÓN (Capital: $30.76) ===
 cap_base = 30.76
 ganado, perdido = 0.0, 0.0
 ops_ganadas, ops_perdidas, ops_totales = 0, 0, 0
 en_op = False
 historial_bloque = []
 
-def libro_velas_sniper(k):
-    """Detecta solo Martillos potentes para evitar el 'anclaje' en pérdidas"""
-    op, hi, lo, cl = float(k[1]), float(k[2]), float(k[3]), float(k[4])
-    cuerpo = abs(cl - op)
-    if cuerpo == 0: cuerpo = 0.001
+def libro_velas_maestro(k_actual, k_previa):
+    """Aplica las reglas de Steve Nison: Martillos y Envolventes"""
+    # Vela Actual
+    op, hi, lo, cl = float(k_actual[1]), float(k_actual[2]), float(k_actual[3]), float(k_actual[4])
+    cuerpo = abs(cl - op) if abs(cl - op) > 0 else 0.001
     m_inf, m_sup = min(op, cl) - lo, hi - max(op, cl)
-    # Martillo: Mecha inferior 3 veces el cuerpo y poca mecha superior
-    if m_inf > (cuerpo * 3) and m_sup < (cuerpo * 0.5): return "MARTILLO 🔨⚡"
-    if m_sup > (cuerpo * 3) and m_inf < (cuerpo * 0.5): return "ESTRELLA ☄️"
+    color = "V" if cl > op else "R"
+
+    # Vela Previa (Para Envolvente)
+    op_p, cl_p = float(k_previa[1]), float(k_previa[4])
+    cuerpo_p = abs(cl_p - op_p)
+    color_p = "V" if cl_p > op_p else "R"
+
+    # 1. MARTILLO (Hammer) 🔨 - Mecha 3x cuerpo
+    if m_inf > (cuerpo * 3) and m_sup < (cuerpo * 0.5):
+        return "MARTILLO 🔨"
+
+    # 2. MARTILLO INVERTIDO ⚒️ - Mecha arriba 3x cuerpo
+    if m_sup > (cuerpo * 3) and m_inf < (cuerpo * 0.5):
+        return "M_INVERTIDO ⚒️"
+
+    # 3. ENVOLVENTE VERDE (Bullish Engulfing) 🌊
+    # Si la vela actual es verde, la anterior roja, y el cuerpo actual supera al anterior
+    if color == "V" and color_p == "R" and cuerpo > (cuerpo_p * 1.2):
+        return "ENVOLVENTE 🌊"
+
     return "Normal"
 
 def mostrar_cuadro_5():
@@ -32,53 +49,50 @@ def mostrar_cuadro_5():
     ts = datetime.now().strftime('%H:%M:%S')
     neto = ganado - perdido
     print("\n" + "╔" + "═"*60 + "╗")
-    print(f"║ 🔱 REPORTE QUANTUM SNIPER | {ts}              ║")
+    print(f"║ 🔱 REPORTE NISON SUPREMO | {ts}               ║")
     print(f"║ 📊 OPS: {ops_totales} | ✅ G: {ops_ganadas} | ❌ P: {ops_perdidas} | 💰 NETO: ${neto:.4f} ║")
     print("╠" + "═"*60 + "╣")
     for h in historial_bloque: print(f"║ • {h} ║")
     print("╚" + "═"*60 + "╝\n")
     historial_bloque.clear()
 
-# --- FASE 1: ADN DE 20 VELAS ---
-print("📡 Analizando ADN de 20 velas antes de empezar...")
+# --- FASE 1: ADN 20 VELAS ---
+print(f"📡 Iniciando... Sincro 15s | Reglas de Nison: Martillo + Envolvente")
 try:
-    k_ini = client.get_klines(symbol='SOLUSDT', interval='1m', limit=20)
-    print(f"✅ ADN Cargado. Buscando Martillos en SOL...")
-except:
-    print("⚠️ Error inicial, reintentando conexión...")
+    client.get_klines(symbol='SOLUSDT', interval='1m', limit=20)
+    print("✅ ADN Cargado. Buscando señales de giro...")
+except: client = conectar()
 
-# --- BUCLE INFINITO REFORZADO ---
+# --- BUCLE PRINCIPAL ---
 while True:
     try:
-        # Consultamos precio y velas actuales
         t = client.get_symbol_ticker(symbol="SOLUSDT")
         sol = float(t['price'])
         k = client.get_klines(symbol='SOLUSDT', interval='1m', limit=5)
         
-        patron = libro_velas_sniper(k[-1])
-        v1 = "V" if float(k[-1][4]) > float(k[-1][1]) else "R"
+        patron = libro_velas_maestro(k[-1], k[-2])
+        cierre_v1 = float(k[-1][4])
+        # Racha de 3 para asegurar contexto
+        v1, v2, v3 = [("R" if float(x[4]) < float(x[1]) else "V") for x in k[-3:]]
 
         if not en_op:
-            print(f"🔍 Escaneando... Vela: {patron} | Precio: {sol}", end='\r')
+            print(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Racha: {v3}{v2}{v1} | Señal: {patron}", end='\r')
             
-            # GATILLO: Martillo en vela roja o Estrella en vela verde
-            if patron == "MARTILLO 🔨⚡" and v1 == "R":
-                p_ent, en_op, t_op, p_al_entrar = sol, True, "LONG", patron
-                max_roi = -99.0
-                print(f"\n🚀 DISPARO SNIPER: {t_op} a {p_ent}")
-            elif patron == "ESTRELLA ☄️" and v1 == "V":
-                p_ent, en_op, t_op, p_al_entrar = sol, True, "SHORT", patron
-                max_roi = -99.0
-                print(f"\n🚀 DISPARO SNIPER: {t_op} a {p_ent}")
+            # GATILLO CON CONFIRMACIÓN
+            if patron != "Normal" and v2 == "R":
+                # Confirmación: Precio actual debe estar por encima del cierre anterior (Fuerza alcista)
+                if sol > cierre_v1:
+                    p_ent, en_op, t_op, p_al_entrar = sol, True, "LONG", patron
+                    max_roi = -99.0
+                    print(f"\n🚀 DISPARO NISON: {t_op} por {patron} a {p_ent}")
         
         else:
-            # Lógica de salida para asegurar el centavo
             diff = ((sol - p_ent) / p_ent) if t_op == "LONG" else ((p_ent - sol) / p_ent)
             roi_neto = (diff * 100 * 10) - 0.22 
             if roi_neto > max_roi: max_roi = roi_neto
             
-            # Cierre: Take Profit o Stop Loss corto
-            if (max_roi >= 0.40 and roi_neto <= (max_roi - 0.12)) or roi_neto <= -0.75:
+            # Salida táctica para asegurar centavos
+            if (max_roi >= 0.45 and roi_neto <= (max_roi - 0.12)) or roi_neto <= -0.70:
                 res = (cap_base * (roi_neto / 100))
                 ops_totales += 1
                 if res > 0: 
@@ -90,9 +104,8 @@ while True:
                 if ops_totales % 5 == 0: mostrar_cuadro_5()
                 en_op = False
 
-        time.sleep(4) # Escaneo cada 4 segundos para que no se ancle
+        time.sleep(15) # Sincronización de 15 segundos obligatoria
 
     except Exception as e:
-        print(f"\n⚠️ Re-conectando por error: {e}")
-        time.sleep(10)
-        client = conectar() # Reset de conexión
+        time.sleep(15)
+        client = conectar()
