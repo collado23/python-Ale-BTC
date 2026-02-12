@@ -7,7 +7,7 @@ def c():
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 cl = c()
-ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
+ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT'] 
 
 # --- CAPITAL ACTUALIZADO ---
 cap_actual = 18.61 
