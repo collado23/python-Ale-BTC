@@ -86,6 +86,6 @@ while True:
                 print(f"📊 {m} | ROI: {roi:.2f}% | Nivel: {s['nivel']}", end='\r')
 
             time.sleep(1); del df
-        time.sleep(10)
+        time.sleep(14)
     except Exception as e:
         time.sleep(5); cl = c()
