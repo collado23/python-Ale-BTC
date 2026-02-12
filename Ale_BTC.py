@@ -74,7 +74,7 @@ while True:
                     else: s['e'] = False
 
                 # --- CONTROL DE RETROCESOS (ZIG ZAG) ---
-                salidas = {1: 0.2, 2: 1.2, 3: 2.0, 4: 2.5, 5: 3.5, 6: 4.0, 7: 4.5 ,8: 5.5, 9: 6, 10: 6.5}
+                salidas = {1: 0.2, 2: 1.2, 3: 2.0, 4: 2.5, 5: 3.5, 6: 4.0, 7: 4.5}
                 if s['nivel'] in salidas and roi <= salidas[s['nivel']]:
                     cap_actual += (MIN_LOT * (roi / 100))
                     s['e'] = False
