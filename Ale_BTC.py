@@ -2,12 +2,12 @@ import os, time
 import pandas as pd
 from binance.client import Client
 
-# Conexión Segura
+# Conexión Ale IA Quantum
 def c(): return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 cl = c(); ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
 
-# Parámetros Ale
-cap_actual = 20.50 
+# Parámetros de tu cuenta
+cap_actual = 20.38 # Actualizado según tu último log 
 MIN_LOT = 15.0 
 st = {m: {'e': False, 'p': 0, 't': ''} for m in ms}
 
@@ -19,44 +19,48 @@ def detectar_rebote_agresivo(df):
     cp = df['close'].iloc[-2]; op = df['open'].iloc[-2]
     e9 = df['ema_9'].iloc[-1]; e27 = df['ema_27'].iloc[-1]
     
-    # REBOTE: Vela actual verde, anterior roja, y precio sobre la amarilla
-    if c > o and cp < op and c > e9:
-        return "LONG" if e9 >= e27 else "SHORT"
+    # ENTRADA: Vela actual verde, anterior roja (o viceversa para Short)
+    # y el precio cruzando la línea amarilla con fuerza.
+    if c > o and cp < op and c > e9 and e9 > e27: return "LONG"
+    if c < o and cp > op and c < e9 and e9 < e27: return "SHORT"
     return None
 
-print(f"🔱 TRIPLE CAZADOR ACTIVADO | MONEDAS: {ms} | DISPARO: ${MIN_LOT}")
+print(f"🔱 CAZADOR DE REBOTES LARGOS | NETO: ${cap_actual} | 3 MONEDAS ACTIVAS")
 
 while True:
     try:
         for m in ms:
             s = st[m]
-            # Pedimos 100 velas para tener historial de sobra
             k = cl.get_klines(symbol=m, interval='1m', limit=100)
             df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
             df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
             px = df['close'].iloc[-1]
             
-            senal = detectar_rebote_agresivo(df)
-
-            # ENTRADA: Si no está en esa moneda y ve rebote
-            if not s['e'] and senal:
-                s['t'], s['p'], s['e'] = senal, px, True
-                print(f"🚀 DISPARO en {m}: Rebote {senal} a {px}")
+            # 1. BUSCAR ENTRADA
+            if not s['e']:
+                senal = detectar_rebote_agresivo(df)
+                if senal:
+                    s['t'], s['p'], s['e'] = senal, px, True
+                    print(f"🚀 DISPARO en {m}: Rebote {senal} a {px}")
             
-            # SALIDA: Si está dentro de esa moneda
+            # 2. GESTIONAR SALIDA (AGUANTE)
             elif s['e']:
                 roi = (((px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']) * 100 * 10) - 0.22
                 e27 = df['ema_27'].iloc[-1]
                 
-                # Cerramos cuando el rebote vuelve a tocar la base (línea azul)
-                toca_base = (s['t'] == "LONG" and px <= e27) or (s['t'] == "SHORT" and px >= e27)
+                # FILTRO DE AGUANTE: No cierra solo por tocar. 
+                # Tiene que romper la línea azul un 0.2% para confirmar que el rebote murió.
+                if s['t'] == "LONG":
+                    termino_rebote = px < (e27 * 0.998) 
+                else: # Para SHORT
+                    termino_rebote = px > (e27 * 1.002)
                 
-                if toca_base:
+                if termino_rebote:
                     ganancia_usd = (MIN_LOT * (roi / 100))
                     cap_actual += ganancia_usd
                     s['e'] = False
                     print(f"💰 CIERRE en {m} | ROI: {roi:.2f}% | NETO: ${cap_actual:.2f}")
 
-        time.sleep(10) # Escaneo rápido cada 10 segundos
+        time.sleep(15)
     except Exception as e:
-        time.sleep(5); cl = c()
+        time.sleep(10); cl = c()
