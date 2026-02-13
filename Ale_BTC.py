@@ -4,7 +4,7 @@ import pandas_ta as ta # Necesitarás instalar: pip install pandas_ta
 from binance.client import Client
 
 def c(): 
-    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
+    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET')) 
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
