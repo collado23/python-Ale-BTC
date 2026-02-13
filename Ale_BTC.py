@@ -14,7 +14,7 @@ st = {m: {'e': False, 'p': 0, 't': '', 'nivel': 0} for m in ms}
 
 def calcular_indicadores(df):
     # RSI y MACD Manuales
-    delta = df['close'].diff()
+    delta = df['close'].diff() 
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     df['rsi'] = 100 - (100 / (1 + (gain / loss)))
