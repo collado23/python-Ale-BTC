@@ -3,98 +3,97 @@ import pandas as pd
 import pandas_ta as ta
 from binance.client import Client
 
-# Conexión
+# Conexión Ale IA Quantum
 def c(): 
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT']
 
-# CAPITAL SEGÚN TU LOG
+# CAPITAL ACTUALIZADO (Ajustar según tu balance real)
 cap_actual = 18.45 
 MIN_LOT = 15.0  
-st = {m: {'e': False, 'p': 0, 't': '', 'v': '', 'nivel': 0} for m in ms}
+st = {m: {'e': False, 'p': 0, 't': '', 'nivel': 0} for m in ms}
 
-def detectar_entrada(df):
-    # Calculamos fuerza y tendencia
+def obtener_datos(m):
+    # Pedimos solo 50 velas para no saturar la API
+    k = cl.get_klines(symbol=m, interval='1m', limit=50)
+    df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
+    df[['open','high','low','close','v']] = df[['open','high','low','close','v']].astype(float)
+    
+    # Indicadores Clave
     df['ema_9'] = ta.ema(df['close'], length=9)
     df['ema_27'] = ta.ema(df['close'], length=27)
     df['rsi'] = ta.rsi(df['close'], length=14)
     adx_df = ta.adx(df['high'], df['low'], df['close'], length=14)
     df['adx'] = adx_df['ADX_14']
-    
-    act = df.iloc[-1]
-    
-    # FILTROS DE ALTA PRECISIÓN
-    fuerza_ok = act['adx'] > 22 # Solo si hay tendencia moviéndose
-    vol_ok = act['v'] > df['v'].rolling(10).mean().iloc[-1] * 1.1
-    cuerpo = abs(act['close'] - act['open'])
-    mecha_ok = cuerpo > ((act['high'] - act['low']) * 0.7)
+    return df
 
-    # Lógica de Disparo
-    if fuerza_ok and vol_ok and mecha_ok:
-        # LONG
-        if act['close'] > act['ema_9'] > act['ema_27'] and act['rsi'] > 52:
-            return "LONG"
-        # SHORT
-        if act['close'] < act['ema_9'] < act['ema_27'] and act['rsi'] < 48:
-            return "SHORT"
-            
-    return None
-
-print(f"🔱 IA QUANTUM V12 | MODO FRANCOTIRADOR | CAP: ${cap_actual}")
+print(f"🔱 IA QUANTUM V13 | ESCALERA 20% | BYPASS 14s | CAP: ${cap_actual}")
 
 while True:
     try:
-        # Una sola petición para todos los precios (Optimiza los 14s)
-        precios = {t['symbol']: float(t['price']) for t in cl.get_all_tickers() if t['symbol'] in ms}
+        # CONSULTA RÁPIDA: Trae precios de TODO Binance de una sola vez
+        # Esto es lo que evita que te bloqueen por 14 segundos
+        precios_all = {t['symbol']: float(t['price']) for t in cl.get_all_tickers() if t['symbol'] in ms}
         
         for m in ms:
             s = st[m]
-            px = precios[m]
+            px = precios_all[m]
             
             if s['e']:
-                # CALCULO ROI Y GANANCIA
+                # --- LÓGICA DE MONITOREO (DENTRO DE OPERACIÓN) ---
                 diff = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
-                roi = (diff * 100 * 10) - 0.22 # x10 palanca y comisiones
+                roi = (diff * 100 * 10) - 0.22
                 gan_usd = (MIN_LOT * (roi / 100))
                 
-                # --- ESCALERA 0.5 A 20% ---
-                # Cada 0.5% sube el nivel. El piso es siempre nivel - 0.4%
-                meta_detectada = (int(roi * 2) / 2.0) 
-                if meta_detectada > s['nivel'] and meta_detectada >= 0.5:
-                    s['nivel'] = meta_detectada
-                    print(f"\n🛡️ {m} BLOQUEÓ NIVEL {s['nivel']}%")
-
-                # EJECUCIÓN DE SALIDAS
-                piso_salida = s['nivel'] - 0.4
+                # ESCALERA DE 0.5 EN 0.5 HASTA EL 20%
+                # Si el ROI es 1.57, meta_actual es 1.5
+                meta_actual = (int(roi * 2) / 2.0) 
                 
-                # 1. Salida por Piso (Breakeven/Trail)
-                if s['nivel'] >= 0.5 and roi <= piso_salida:
-                    cap_actual += gan_usd
-                    print(f"\n✅ CIERRE PROTEGIDO {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
-                    s['e'] = False
+                if meta_actual > s['nivel'] and meta_actual >= 0.5:
+                    s['nivel'] = meta_actual
+                    print(f"\n🛡️ {m} SUBIÓ A NIVEL {s['nivel']}% | ASEGURANDO GANANCIA")
 
-                # 2. Stop Loss de Seguridad (Apretado a -0.7%)
-                elif roi <= -0.7:
+                # PISO DE SALIDA: Siempre 0.4% por debajo del nivel alcanzado
+                piso = s['nivel'] - 0.4
+                
+                if s['nivel'] >= 0.5 and roi <= piso:
                     cap_actual += gan_usd
-                    print(f"\n❌ SL CORTADO {m} | PNL: ${gan_usd:.2f}")
+                    print(f"\n✅ CIERRE EN PISO {s['nivel']}% | GANASTE: ${gan_usd:.2f} | TOTAL: ${cap_actual:.2f}")
+                    s['e'] = False
+                
+                elif roi <= -0.7: # Stop Loss corto para proteger
+                    cap_actual += gan_usd
+                    print(f"\n❌ SL CORTADO en {m} | PNL: ${gan_usd:.2f}")
                     s['e'] = False
 
                 print(f"📊 {m}: {roi:.2f}% (N{s['nivel']})", end=' | ')
 
             else:
-                # Análisis de entrada
-                k = cl.get_klines(symbol=m, interval='1m', limit=50)
-                df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
-                df[['open','high','low','close','v']] = df[['open','high','low','close','v']].astype(float)
+                # --- LÓGICA DE ENTRADA (BUSCANDO OPORTUNIDAD) ---
+                df = obtener_datos(m)
+                act = df.iloc[-1]
                 
-                res = detectar_entrada(df)
-                if res:
-                    s['t'], s['p'], s['e'], s['nivel'] = res, px, True, 0
-                    print(f"\n🚀 ENTRADA CONFIRMADA {m} | {res} | Px: {px}")
+                # Filtros: Fuerza (ADX > 20) + Tendencia (RSI) + Volumen
+                vol_ok = act['v'] > df['v'].rolling(10).mean().iloc[-1] * 1.1
+                fuerza = act['adx'] > 20
+                
+                # LONG
+                if fuerza and vol_ok and act['close'] > act['ema_9'] > act['ema_27'] and act['rsi'] > 53:
+                    s['t'], s['p'], s['e'], s['nivel'] = "LONG", px, True, 0
+                    print(f"\n🚀 DISPARO LONG en {m} | Px: {px}")
+                
+                # SHORT
+                elif fuerza and vol_ok and act['close'] < act['ema_9'] < act['ema_27'] and act['rsi'] < 47:
+                    s['t'], s['p'], s['e'], s['nivel'] = "SHORT", px, True, 0
+                    print(f"\n🚀 DISPARO SHORT en {m} | Px: {px}")
+                
+                del df
 
-        time.sleep(1.5) # Respiro para la API
+        # Pausa de 1 segundo para mantener la API "fresca"
+        time.sleep(1)
 
     except Exception as e:
+        print(f"\n⚠️ Error: {e}")
         time.sleep(2); cl = c()
