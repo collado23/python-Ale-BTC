@@ -10,24 +10,17 @@ cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT', 'SOLUSDT', 'DOTUSDT', 'MATICUSDT']
 LIMITE_OPERACIONES = 2
 
-cap_actual = 17.14 
-MIN_LOT = 17.0 
-st = {m: {'e': False, 'p': 0, 't': '', 'max_px': 0, 'atr': 0} for m in ms}
+cap_actual = 16.54 
+MIN_LOT = 16.5 # Ajustado para cuidar el margen restante
+st = {m: {'e': False, 'p': 0, 't': '', 'max_px': 0} for m in ms}
 
 def calcular_indicadores(df):
-    # EMAs de Referencia
-    df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-    df['ema27'] = df['close'].ewm(span=27, adjust=False).mean()
+    # EMAs de 35 y 50 (Tu nueva configuración)
+    df['ema35'] = df['close'].ewm(span=35, adjust=False).mean()
+    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # ATR para el "Resorte"
-    high_low = df['high'] - df['low']
-    high_cp = abs(df['high'] - df['close'].shift())
-    low_cp = abs(df['low'] - df['close'].shift())
-    df['tr'] = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
-    df['atr'] = df['tr'].rolling(14).mean()
-    
-    # MACD para el gatillo
+    # MACD para confirmar el momentum
     df['ema12'] = df['close'].ewm(span=12, adjust=False).mean()
     df['ema26'] = df['close'].ewm(span=26, adjust=False).mean()
     df['macd'] = df['ema12'] - df['ema26']
@@ -38,16 +31,25 @@ def calcular_indicadores(df):
 def detectar_entrada(df):
     df = calcular_indicadores(df)
     act = df.iloc[-1]
-    # Filtro de volumen
-    vol_ok = act['v'] > df['v'].rolling(15).mean().iloc[-1] * 1.3
+    ant = df.iloc[-2]
     
-    if act['close'] > act['ema200'] and act['ema9'] > act['ema27'] and act['hist'] > 0 and vol_ok:
-        return "LONG", act['atr']
-    if act['close'] < act['ema200'] and act['ema9'] < act['ema27'] and act['hist'] < 0 and vol_ok:
-        return "SHORT", act['atr']
-    return None, 0
+    # Filtro de fuerza: La distancia entre EMAs debe aumentar
+    distancia_act = abs(act['ema35'] - act['ema50'])
+    distancia_ant = abs(ant['ema35'] - ant['ema50'])
+    tendencia_abriendose = distancia_act > distancia_ant
 
-print(f"🔱 IA QUANTUM V27 | SISTEMA DE RESORTE (ATR) | CAP: ${cap_actual}")
+    vol_ok = act['v'] > df['v'].rolling(20).mean().iloc[-1] * 1.3
+    
+    # LONG: Precio > 200 y 35 > 50 confirmando apertura
+    if act['close'] > act['ema200'] and act['ema35'] > act['ema50'] and tendencia_abriendose and act['hist'] > 0:
+        if vol_ok: return "LONG"
+    
+    # SHORT: Precio < 200 y 35 < 50 confirmando apertura
+    if act['close'] < act['ema200'] and act['ema35'] < act['ema50'] and tendencia_abriendose and act['hist'] < 0:
+        if vol_ok: return "SHORT"
+    return None
+
+print(f"🔱 IA QUANTUM V28 | ESTRATEGIA EMAs 35/50 | CAP: ${cap_actual}")
 
 while True:
     try:
@@ -58,27 +60,24 @@ while True:
             s = st[m]
             px = precios[m]
             if s['e']:
-                # Actualizar el punto máximo alcanzado (el estiramiento del resorte)
+                # Lógica del Resorte mejorada para tendencias largas
                 if s['t'] == "LONG":
                     s['max_px'] = max(s['max_px'], px)
-                    distancia_retroceso = (s['max_px'] - px) / s['p'] * 100 * 10
+                    retroceso = (s['max_px'] - px) / s['p'] * 1000
                 else:
                     s['max_px'] = min(s['max_px'], px) if s['max_px'] > 0 else px
-                    distancia_retroceso = (px - s['max_px']) / s['p'] * 100 * 10
+                    retroceso = (px - s['max_px']) / s['p'] * 1000
 
-                roi = ((px - s['p']) / s['p'] * 100 * 10) if s['t'] == "LONG" else ((s['p'] - px) / s['p'] * 100 * 10)
+                roi = ((px - s['p']) / s['p'] * 1000) if s['t'] == "LONG" else ((s['p'] - px) / s['p'] * 1000)
                 roi -= 0.22 # Comisiones
                 gan_usd = (MIN_LOT * (roi / 100))
 
-                # EL RESORTE: Si el precio retrocede más de 1.5 veces el ATR (en escala ROI)
-                # o si el ROI cae 0.25% desde el máximo, saltamos.
-                limite_resorte = 0.25 
-                
-                if roi > 0.4 and distancia_retroceso > limite_resorte:
+                # Ajuste de salida: si ya ganamos 0.5%, el resorte se activa a los 0.3% de retroceso
+                if roi > 0.50 and retroceso > 0.30:
                     cap_actual += gan_usd
-                    print(f"\n🚀 RESORTE DISPARADO en {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
+                    print(f"\n✅ CIERRE TENDENCIA {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
                     s['e'] = False
-                elif roi <= -0.90:
+                elif roi <= -1.2: # SL más amplio para aguantar la EMA 50
                     cap_actual += gan_usd
                     print(f"\n❌ STOP LOSS {m} | PNL: ${gan_usd:.2f}")
                     s['e'] = False
@@ -87,15 +86,15 @@ while True:
             
             else:
                 if ops_abiertas < LIMITE_OPERACIONES:
-                    k = cl.get_klines(symbol=m, interval='1m', limit=100)
+                    k = cl.get_klines(symbol=m, interval='1m', limit=300) # Más velas para EMAs largas
                     df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
                     df[['open','high','low','close','v']] = df[['open','high','low','close','v']].astype(float)
-                    res, atr_val = detectar_entrada(df)
+                    res = detectar_entrada(df)
                     if res:
-                        s['t'], s['p'], s['e'], s['max_px'], s['atr'] = res, px, True, px, atr_val
+                        s['t'], s['p'], s['e'], s['max_px'] = res, px, True, px
                         ops_abiertas += 1
-                        print(f"\n🎯 ENTRADA {res} en {m} | Resorte cargado")
+                        print(f"\n🎯 TENDENCIA DETECTADA {res} en {m} (EMAs 35/50)")
 
-        time.sleep(1)
+        time.sleep(1.2)
     except Exception as e:
         time.sleep(2); cl = c()
