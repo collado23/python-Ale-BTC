@@ -1,51 +1,86 @@
-import os, time
+import os, time, csv
 import pandas as pd
 import numpy as np
 from binance.client import Client
 
+# Conexión Segura
 def c(): 
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT', 'SOLUSDT', 'DOTUSDT', 'MATICUSDT']
-LIMITE_OPERACIONES = 2
+FILE_MEMORIA = "memoria_ia.csv"
 
+# --- FUNCIONES DE APRENDIZAJE ---
+def guardar_operacion(moneda, tipo, modo, roi, resultado):
+    existe = os.path.exists(FILE_MEMORIA)
+    with open(FILE_MEMORIA, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if not existe:
+            writer.writerow(['fecha', 'moneda', 'tipo', 'modo', 'roi', 'resultado'])
+        writer.writerow([time.strftime('%Y-%m-%d %H:%M:%S'), moneda, tipo, modo, roi, resultado])
+
+def obtener_aprendizaje():
+    if not os.path.exists(FILE_MEMORIA): return 1.0 # Factor de riesgo normal
+    try:
+        df = pd.read_csv(FILE_MEMORIA)
+        if len(df) < 2: return 1.0
+        ultimas = df.tail(3)
+        # Si hay rachas de pérdidas, devuelve un factor para ser más estricto (1.5 = 50% más estricto)
+        if (ultimas['roi'] < 0).sum() >= 2: return 1.5 
+        return 0.8 # Si viene ganando, se vuelve un poco más agresivo
+    except: return 1.0
+
+# --- CEREBRO DE TRADING ---
 cap_actual = 16.54 
 MIN_LOT = 16.5
-st = {m: {'e': False, 'p': 0, 't': '', 'max_px': 0, 'break_even': False} for m in ms}
+st = {m: {'e': False, 'p': 0, 't': '', 'max_px': 0, 'modo': ''} for m in ms}
 
-def calcular_indicadores(df):
+def analizar_todo(df):
+    # Indicadores Maestro
     df['ema35'] = df['close'].ewm(span=35, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+    df['dist'] = ((df['ema35'] - df['ema200']) / df['ema200']) * 100
     
-    # Índice de Fuerza Relativa (RSI) para detectar agotamiento
+    # RSI y Velas
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     df['rsi'] = 100 - (100 / (1 + (gain / loss)))
     
-    # ATR para medir la "normalidad" del movimiento
-    high_low = df['high'] - df['low']
-    df['atr'] = high_low.rolling(14).mean()
-    return df
+    act, ant = df.iloc[-1], df.iloc[-2]
+    # Patrón Envolvente (Engulfing)
+    e_l = act['close'] > ant['open'] and act['open'] < ant['close'] and act['close'] > act['open']
+    e_s = act['close'] < ant['open'] and act['open'] > ant['close'] and act['close'] < act['open']
+    # Patrón de Agotamiento (Mechas)
+    p_a = (act['high'] - max(act['close'], act['open'])) > (abs(act['close'] - act['open']) * 2)
+    
+    return df, e_l, e_s, p_a
 
 def detectar_entrada(df):
-    df = calcular_indicadores(df)
+    df, e_l, e_s, p_a = analizar_todo(df)
     act = df.iloc[-1]
+    factor = obtener_aprendizaje() # El bot "recuerda" si debe ser estricto
     
-    # DISTANCIA ENTRE EMAs (Reduce Trend)
-    # Si las medias están muy pegadas, el riesgo es alto (lateral)
-    distancia_medias = abs(act['ema35'] - act['ema50']) / act['ema50'] * 100
-    vol_ok = act['v'] > df['v'].rolling(20).mean().iloc[-1] * 1.5
+    vol_ok = act['v'] > df['v'].rolling(20).mean().iloc[-1] * (1.5 * factor)
+    dist_val = abs(act['dist'])
 
-    if distancia_medias > 0.05 and vol_ok: # Solo si hay tendencia clara
-        if act['ema35'] > act['ema50'] and act['rsi'] > 52:
-            return "LONG"
-        if act['ema35'] < act['ema50'] and act['rsi'] < 48:
-            return "SHORT"
-    return None
+    # 1. TENDENCIA (Zig-Zag normal o subida larga)
+    if vol_ok and (0.05 < dist_val < (1.1 / factor)):
+        if act['ema35'] > act['ema50'] and e_l and act['rsi'] > 50:
+            return "LONG", "TENDENCIA"
+        if act['ema35'] < act['ema50'] and e_s and act['rsi'] < 50:
+            return "SHORT", "TENDENCIA"
 
-print(f"🔱 IA QUANTUM V32 | MULTIMODAL & RISK REDUCE | CAP: ${cap_actual}")
+    # 2. VOLTEO (Pico alto y reversión fuerte)
+    if dist_val > 1.2 or act['rsi'] > 75 or act['rsi'] < 25:
+        if act['rsi'] > 75 and (p_a or e_s): return "SHORT", "VOLTEO"
+        if act['rsi'] < 25 and (p_a or e_l): return "LONG", "VOLTEO"
+            
+    return None, ""
+
+print(f"🔱 IA QUANTUM V36 | MEMORIA & APRENDIZAJE | CAP: ${cap_actual}")
 
 while True:
     try:
@@ -56,45 +91,36 @@ while True:
             s = st[m]
             px = precios[m]
             if s['e']:
-                # Calcular ROI y distancias
-                if s['t'] == "LONG":
-                    s['max_px'] = max(s['max_px'], px)
-                    retroceso = (s['max_px'] - px) / s['p'] * 1000
-                else:
-                    s['max_px'] = min(s['max_px'], px) if s['max_px'] > 0 else px
-                    retroceso = (px - s['max_px']) / s['p'] * 1000
-
                 roi = ((px - s['p']) / s['p'] * 1000) if s['t'] == "LONG" else ((s['p'] - px) / s['p'] * 1000)
                 roi -= 0.22 
-
-                # 🛡️ PROTECCIÓN DE RIESGO (Reduce Trend Logic)
-                # Si llega a 0.4% de ROI, movemos el Stop al precio de entrada (Break Even)
-                if roi > 0.4 and not s['break_even']:
-                    s['break_even'] = True
-                    print(f"\n🛡️ {m} EN BREAK-EVEN (Riesgo Cero)")
-
-                # LÓGICA DE SALIDA SEGÚN EL MOVIMIENTO
-                # Si el ROI es alto (explosión), el resorte es más sensible
-                freno = 0.20 if roi > 1.2 else 0.40
                 
-                # Salida por retroceso, stop loss inicial o break even
-                if (roi > 0.3 and retroceso > freno) or (s['break_even'] and roi < 0.05) or roi <= -1.0:
+                s['max_px'] = max(s['max_px'], px) if s['t'] == "LONG" else (min(s['max_px'], px) if s['max_px'] > 0 else px)
+                retroceso = abs(s['max_px'] - px) / s['p'] * 1000
+                
+                # Resorte adaptativo según ROI y Modo
+                freno = 0.15 if (roi > 1.2 or s['modo'] == "VOLTEO") else 0.35
+                
+                if (roi > 0.35 and retroceso > freno) or roi <= -1.1:
                     gan_usd = (MIN_LOT * (roi / 100))
                     cap_actual += gan_usd
-                    print(f"\n✅ SALIDA ASEGURADA {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
+                    # GUARDAR EN MEMORIA PARA LA PRÓXIMA VEZ
+                    resultado = "WIN" if roi > 0 else "LOSS"
+                    guardar_operacion(m, s['t'], s['modo'], round(roi, 2), resultado)
+                    
+                    print(f"\n✅ CIERRE {s['modo']} {m} | ROI: {roi:.2f}% | NETO: ${cap_actual:.2f}")
                     s['e'] = False
                 
-                print(f"📊 {m}: {roi:.2f}%", end=' | ')
+                print(f"📊 {m} ({s['t']}): {roi:.2f}%", end=' | ')
             
             else:
-                if ops_abiertas < LIMITE_OPERACIONES:
+                if ops_abiertas < 2:
                     k = cl.get_klines(symbol=m, interval='1m', limit=150)
-                    df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i']).astype(float)
-                    res = detectar_entrada(df)
+                    df_raw = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i']).astype(float)
+                    res, modo = detectar_entrada(df_raw)
                     if res:
-                        s['t'], s['p'], s['e'], s['max_px'], s['break_even'] = res, px, True, px, False
+                        s['t'], s['p'], s['e'], s['max_px'], s['modo'] = res, px, True, px, modo
                         ops_abiertas += 1
-                        print(f"\n🎯 ENTRADA {res} en {m} (Tendencia Validada)")
+                        print(f"\n🚀 DISPARO {modo} {res} en {m} (Aprendizaje Aplicado)")
 
         time.sleep(1)
     except Exception as e:
