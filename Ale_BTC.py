@@ -4,33 +4,30 @@ import numpy as np
 from binance.client import Client
 
 def c(): 
-    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET')) 
+    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
 cl = c()
 ms = ['LINKUSDT', 'ADAUSDT', 'XRPUSDT', 'SOLUSDT', 'DOTUSDT', 'MATICUSDT']
-LIMITE_OPERACIONES = 2 # Bajamos a 2 para concentrar el capital y no dispersar
+LIMITE_OPERACIONES = 2
 
 cap_actual = 17.14 
-MIN_LOT = 16.0 
-st = {m: {'e': False, 'p': 0, 't': '', 'nivel': 0} for m in ms}
+MIN_LOT = 17.0 
+st = {m: {'e': False, 'p': 0, 't': '', 'max_px': 0, 'atr': 0} for m in ms}
 
 def calcular_indicadores(df):
-    # EMAs Robustas
+    # EMAs de Referencia
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
     df['ema27'] = df['close'].ewm(span=27, adjust=False).mean()
     df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # ADX Manual (Para medir fuerza de tendencia)
-    plus_dm = df['high'].diff()
-    minus_dm = df['low'].diff()
-    tr = pd.concat([df['high'] - df['low'], abs(df['high'] - df['close'].shift()), abs(df['low'] - df['close'].shift())], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-    plus_di = 100 * (plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0).rolling(14).mean() / atr)
-    minus_di = 100 * (minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0).rolling(14).mean() / atr)
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    df['adx'] = dx.rolling(14).mean()
-
-    # MACD
+    # ATR para el "Resorte"
+    high_low = df['high'] - df['low']
+    high_cp = abs(df['high'] - df['close'].shift())
+    low_cp = abs(df['low'] - df['close'].shift())
+    df['tr'] = pd.concat([high_low, high_cp, low_cp], axis=1).max(axis=1)
+    df['atr'] = df['tr'].rolling(14).mean()
+    
+    # MACD para el gatillo
     df['ema12'] = df['close'].ewm(span=12, adjust=False).mean()
     df['ema26'] = df['close'].ewm(span=26, adjust=False).mean()
     df['macd'] = df['ema12'] - df['ema26']
@@ -41,19 +38,16 @@ def calcular_indicadores(df):
 def detectar_entrada(df):
     df = calcular_indicadores(df)
     act = df.iloc[-1]
+    # Filtro de volumen
+    vol_ok = act['v'] > df['v'].rolling(15).mean().iloc[-1] * 1.3
     
-    # FILTRO CLAVE: Solo si el ADX > 25 (Hay tendencia fuerte)
-    tendencia_fuerte = act['adx'] > 25
-    vol_ok = act['v'] > df['v'].rolling(15).mean().iloc[-1] * 1.4
+    if act['close'] > act['ema200'] and act['ema9'] > act['ema27'] and act['hist'] > 0 and vol_ok:
+        return "LONG", act['atr']
+    if act['close'] < act['ema200'] and act['ema9'] < act['ema27'] and act['hist'] < 0 and vol_ok:
+        return "SHORT", act['atr']
+    return None, 0
 
-    if tendencia_fuerte and vol_ok:
-        if act['close'] > act['ema200'] and act['ema9'] > act['ema27'] and act['hist'] > 0:
-            return "LONG"
-        if act['close'] < act['ema200'] and act['ema9'] < act['ema27'] and act['hist'] < 0:
-            return "SHORT"
-    return None
-
-print(f"🔱 IA QUANTUM V26 | FILTRO ADX ACTIVO | CAP: ${cap_actual}")
+print(f"🔱 IA QUANTUM V27 | SISTEMA DE RESORTE (ATR) | CAP: ${cap_actual}")
 
 while True:
     try:
@@ -64,35 +58,44 @@ while True:
             s = st[m]
             px = precios[m]
             if s['e']:
-                diff = (px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']
-                roi = (diff * 100 * 10) - 0.22
+                # Actualizar el punto máximo alcanzado (el estiramiento del resorte)
+                if s['t'] == "LONG":
+                    s['max_px'] = max(s['max_px'], px)
+                    distancia_retroceso = (s['max_px'] - px) / s['p'] * 100 * 10
+                else:
+                    s['max_px'] = min(s['max_px'], px) if s['max_px'] > 0 else px
+                    distancia_retroceso = (px - s['max_px']) / s['p'] * 100 * 10
+
+                roi = ((px - s['p']) / s['p'] * 100 * 10) if s['t'] == "LONG" else ((s['p'] - px) / s['p'] * 100 * 10)
+                roi -= 0.22 # Comisiones
                 gan_usd = (MIN_LOT * (roi / 100))
 
-                if roi > s['nivel'] + 0.2:
-                    s['nivel'] = max(s['nivel'], int(roi * 4) / 4.0)
-
-                # PISO MÁS PACIENTE (0.30% de aire)
-                piso = s['nivel'] - 0.30
+                # EL RESORTE: Si el precio retrocede más de 1.5 veces el ATR (en escala ROI)
+                # o si el ROI cae 0.25% desde el máximo, saltamos.
+                limite_resorte = 0.25 
                 
-                # Salida por piso o Stop Loss
-                if (s['nivel'] >= 0.5 and roi <= piso) or roi <= -1.1:
+                if roi > 0.4 and distancia_retroceso > limite_resorte:
                     cap_actual += gan_usd
-                    print(f"\n✅ CIERRE ESTRATÉGICO {m} | PNL: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
+                    print(f"\n🚀 RESORTE DISPARADO en {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
+                    s['e'] = False
+                elif roi <= -0.90:
+                    cap_actual += gan_usd
+                    print(f"\n❌ STOP LOSS {m} | PNL: ${gan_usd:.2f}")
                     s['e'] = False
                 
-                print(f"📊 {m}: {roi:.2f}%", end=' | ')
+                print(f"📊 {m}: {roi:.2f}% (Máx: {s['max_px']})", end=' | ')
             
             else:
                 if ops_abiertas < LIMITE_OPERACIONES:
                     k = cl.get_klines(symbol=m, interval='1m', limit=100)
                     df = pd.DataFrame(k, columns=['t','open','high','low','close','v','ct','qv','nt','tb','tq','i'])
                     df[['open','high','low','close','v']] = df[['open','high','low','close','v']].astype(float)
-                    res = detectar_entrada(df)
+                    res, atr_val = detectar_entrada(df)
                     if res:
-                        s['t'], s['p'], s['e'], s['nivel'] = res, px, True, 0
+                        s['t'], s['p'], s['e'], s['max_px'], s['atr'] = res, px, True, px, atr_val
                         ops_abiertas += 1
-                        print(f"\n🚀 DISPARO {res} en {m} (ADX: Confirmado)")
+                        print(f"\n🎯 ENTRADA {res} en {m} | Resorte cargado")
 
-        time.sleep(1.5)
+        time.sleep(1)
     except Exception as e:
         time.sleep(2); cl = c()
