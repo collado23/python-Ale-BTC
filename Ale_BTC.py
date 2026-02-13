@@ -13,8 +13,7 @@ MIN_LOT = 15.0
 st = {m: {'e': False, 'p': 0, 't': '', 'nivel': 0} for m in ms}
 
 def calcular_indicadores(df):
-    # RSI y MACD Manuales
-    delta = df['close'].diff() 
+    delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     df['rsi'] = 100 - (100 / (1 + (gain / loss)))
@@ -29,17 +28,17 @@ def calcular_indicadores(df):
 def detectar_entrada(df):
     df = calcular_indicadores(df)
     act = df.iloc[-1]
-    # Filtro de volumen más estricto para evitar entradas falsas
     vol_ok = act['v'] > df['v'].rolling(10).mean().iloc[-1] * 1.2
-    macd_confirmado = abs(act['macd'] - act['signal']) > (act['macd'] * 0.1) # Pendiente real
+    # Filtro MACD para asegurar que el cruce tenga fuerza
+    macd_fuerza = abs(act['macd'] - act['signal']) > (abs(act['macd']) * 0.05)
     
-    if act['close'] > act['ema9'] > act['ema27'] and act['rsi'] > 54 and act['macd'] > act['signal'] and macd_confirmado:
+    if act['close'] > act['ema9'] > act['ema27'] and act['rsi'] > 53 and act['macd'] > act['signal'] and macd_fuerza:
         if vol_ok: return "LONG"
-    if act['close'] < act['ema9'] < act['ema27'] and act['rsi'] < 46 and act['macd'] < act['signal'] and macd_confirmado:
+    if act['close'] < act['ema9'] < act['ema27'] and act['rsi'] < 47 and act['macd'] < act['signal'] and macd_fuerza:
         if vol_ok: return "SHORT"
     return None
 
-print(f"🔱 IA QUANTUM V17 | PROTECCIÓN ULTRA-PEGADA | CAP: ${cap_actual}")
+print(f"🔱 IA QUANTUM V18 | PISO ULTRA-PEGADO 0.10% | CAP: ${cap_actual}")
 
 while True:
     try:
@@ -52,21 +51,21 @@ while True:
                 roi = (diff * 100 * 10) - 0.22
                 gan_usd = (MIN_LOT * (roi / 100))
 
-                # --- NUEVA ESCALERA CORTA (0.2 en 0.2) ---
-                # Si el ROI sube, el nivel sube más rápido para "pegar" el piso
-                meta_actual = (int(roi * 5) / 5.0) # Detecta niveles cada 0.2%
-                if meta_actual > s['nivel'] and meta_actual >= 0.4:
+                # --- ESCALERA SÚPER CORTA (Cada 0.1%) ---
+                # Detectamos niveles cada 0.1% para que el piso suba constantemente
+                meta_actual = (int(roi * 10) / 10.0) 
+                if meta_actual > s['nivel'] and meta_actual >= 0.3:
                     s['nivel'] = meta_actual
-                    print(f"\n🛡️ {m} PROTECCIÓN ACTIVADA: {s['nivel']}%")
+                    print(f"\n🛡️ {m} SUBIÓ NIVEL: {s['nivel']}%")
 
-                # PISO ULTRA AJUSTADO (A solo 0.15% de distancia)
-                piso = s['nivel'] - 0.15
+                # PISO GARRAPATA: A solo 0.10% del nivel máximo alcanzado
+                piso = s['nivel'] - 0.10
                 
-                if s['nivel'] >= 0.4 and roi <= piso:
+                if s['nivel'] >= 0.3 and roi <= piso:
                     cap_actual += gan_usd
-                    print(f"\n✅ CIERRE QUIRÚRGICO {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
+                    print(f"\n✅ CIERRE INSTANTÁNEO {m} | GANASTE: ${gan_usd:.2f} | NETO: ${cap_actual:.2f}")
                     s['e'] = False
-                elif roi <= -0.65: # Stop Loss un poco más ajustado
+                elif roi <= -0.60: # Stop Loss bien corto para no regalar nada
                     cap_actual += gan_usd
                     print(f"\n❌ SL PROTECTOR {m} | PNL: ${gan_usd:.2f}")
                     s['e'] = False
