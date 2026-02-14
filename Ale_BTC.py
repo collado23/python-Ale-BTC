@@ -1,125 +1,123 @@
 import os, time, csv
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from binance.client import Client
 
 # --- CONEXIÓN ---
 def c(): 
     return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
 
-try:
-    cl = c()
-    print("✅ MOTOR BLINDADO V41: FILTRO DE TENDENCIA + RIESGO DINÁMICO")
-except:
-    print("❌ ERROR DE CONEXIÓN")
+cl = c()
 
-# --- CONFIGURACIÓN ESTRATÉGICA ---
+# --- CONFIGURACIÓN ---
 ms = ['XRPUSDT', 'LINKUSDT', 'SOLUSDT', 'ADAUSDT', 'MATICUSDT', 'DOTUSDT']
-FILE_MEMORIA = "memoria_maestra.csv"
-cap_inicial = 16.54  
+FILE_MEMORIA = "memoria_maestra.csv" 
+cap_inicial = 16.54 
 
-# --- 🧠 MEMORIA CON FILTRO DE SEGURIDAD ---
-def gestionar_memoria(moneda="", tipo="", modo="", roi=0, resultado="", leer=False):
+# --- 🧠 MEMORIA CON FILTRO HORARIO ---
+def gestionar_memoria(leer=False, datos=None):
     if not os.path.exists(FILE_MEMORIA):
         with open(FILE_MEMORIA, 'w', newline='') as f:
-            csv.writer(f).writerow(['fecha', 'moneda', 'tipo', 'modo', 'roi', 'resultado'])
+            csv.writer(f).writerow(['fecha', 'hora', 'moneda', 'roi', 'res', 'dist_ema_open', 'duracion_min'])
     
     if leer:
         try:
             df = pd.read_csv(FILE_MEMORIA)
-            if len(df) < 1: return 1.0, cap_inicial, "⚔️ FRANCOTIRADOR"
+            cap_actual = cap_inicial + (cap_inicial * (df['roi'].sum() / 100))
             
-            ganancia_acumulada = df['roi'].sum()
-            capital_actual = cap_inicial + (cap_inicial * (ganancia_acumulada / 100))
+            # --- 🕵️ ANALIZADOR DE HORARIOS ---
+            # Bloqueamos las horas donde el ROI promedio es negativo (si hay suficientes datos)
+            horas_negras = []
+            if len(df) > 10:
+                df['hora_h'] = pd.to_datetime(df['fecha'] + ' ' + df['hora']).dt.hour
+                stats_horas = df.groupby('hora_h')['roi'].mean()
+                horas_negras = stats_horas[stats_horas < -0.2].index.tolist()
             
-            ultimas = df.tail(3)
-            fallos = (ultimas['resultado'] == "LOSS").sum()
+            zonas_prohibidas = df[df['res'] == "LOSS"]['dist_ema_open'].tail(20).tolist() if 'dist_ema_open' in df.columns else []
+            blindaje = (df.iloc[-1]['res'] == "WIN") if len(df) > 0 else False
+            modo = "⚔️ ESTRATEGA" if cap_actual >= 15.0 else "🛡️ RECLUTA"
             
-            # Lógica de Rangos
-            if capital_actual < 15.80 or fallos >= 2: 
-                return 1.4, capital_actual, "🛡️ DEFENSIVO"
-            if (ultimas['resultado'] == "WIN").sum() >= 2 and capital_actual > 16.54: 
-                return 0.8, capital_actual, "🔥 BERSERKER"
-            
-            return 1.0, capital_actual, "⚔️ FRANCOTIRADOR"
-        except: return 1.0, cap_inicial, "⚔️ FRANCOTIRADOR"
+            return cap_actual, modo, blindaje, zonas_prohibidas, horas_negras
+        except: return cap_inicial, "⚔️ ESTRATEGA", False, [], []
     else:
         with open(FILE_MEMORIA, 'a', newline='') as f:
-            csv.writer(f).writerow([time.strftime('%Y-%m-%d %H:%M:%S'), moneda, tipo, modo, roi, resultado])
+            csv.writer(f).writerow([
+                time.strftime('%Y-%m-%d'), time.strftime('%H:%M:%S'), 
+                datos['m'], datos['roi'], datos['res'], 
+                datos.get('dist', 0), datos.get('duracion', 0)
+            ])
 
-# --- ⚔️ MOTOR DE ANÁLISIS V41 (ANTI-SERRUCHO) ---
-def analizar_entrada(m, factor, capital):
+# --- ♟️ ANALIZADOR TÁCTICO CON RELOJ ---
+def analizar_tablero(m, zonas_prohibidas, horas_negras):
+    hora_actual = datetime.now().hour
+    if hora_actual in horas_negras:
+        return None # "Memoria dice: En esta hora solemos perder, no opero."
+
     try:
-        k = cl.get_klines(symbol=m, interval='1m', limit=100)
+        k = cl.get_klines(symbol=m, interval='1m', limit=50)
         df = pd.DataFrame(k, columns=['t','o','h','l','c','v','ct','qv','nt','tb','tq','i']).astype(float)
+        v = df.iloc[-1]
         
-        # Indicadores Clave
         ema9 = df['c'].ewm(span=9).mean().iloc[-1]
         ema27 = df['c'].ewm(span=27).mean().iloc[-1]
+        dist_actual = round(abs(ema9 - ema27) / ema27 * 100, 4)
         
-        # FILTRO DE SEPARACIÓN (Evita que el bot entre si las líneas están pegadas)
-        distancia = abs(ema9 - ema27) / ema27 * 100
-        min_distancia = 0.05 # El "cocodrilo" debe estar abierto
-        
-        vol_avg = df['v'].tail(15).mean()
-        px = df['c'].iloc[-1]
-        inyeccion = df['v'].iloc[-1] > (vol_avg * 2.5)
+        for zona in zonas_prohibidas:
+            if abs(dist_actual - zona) < 0.005: return None 
 
-        # RIESGO DINÁMICO: Si el capital es bajo, bajamos la potencia a 8x
-        max_x = 15 if capital >= 16.0 else 8 
-        fuerza_x = int(np.clip(max_x / factor, 4, max_x))
+        v_mult = v['v'] / df['v'].tail(20).mean()
+        cuerpo = abs(v['c'] - v['o'])
+        rechazo = (v['h'] - max(v['c'], v['o'])) if v['c'] > v['o'] else (min(v['c'], v['o']) - v['l'])
+        pct_rechazo = round(rechazo / cuerpo, 2) if cuerpo > 0 else 1
+        racha = (df['c'].tail(4) > df['o'].tail(4)).sum() if v['c'] > v['o'] else (df['c'].tail(4) < df['o'].tail(4)).sum()
 
-        # Señal de LONG (Subida clara)
-        if inyeccion and ema9 > (ema27 * 1.0006) and px > ema9 and distancia > min_distancia:
-            return "LONG", "BULL_RUN", fuerza_x
-            
-        # Señal de SHORT (Caída clara)
-        if inyeccion and ema9 < (ema27 * 0.9994) and px < ema9 and distancia > min_distancia:
-            return "SHORT", "BEAR_DROP", fuerza_x
-            
-        return None, None, 0
-    except: return None, None, 0
+        return {'v_mult': v_mult, 'dist': dist_actual, 'rechazo': pct_rechazo, 'c': v['c'], 'e9': ema9, 'e27': ema27, 'racha': racha}
+    except: return None
 
-# --- 🚀 BUCLE DE OPERACIÓN ---
-st = {m: {'e': False, 'p': 0, 't': '', 'max': 0, 'modo': '', 'x': 10} for m in ms}
-factor_actual, capital_trabajo, rango = gestionar_memoria(leer=True)
+# --- 🚀 BUCLE PRINCIPAL ---
+st = {m: {'e': False, 'p': 0, 't': '', 'max': 0, 'x': 10, 'be': False, 'adn': {}, 'inicio': 0} for m in ms}
+capital, modo, blindaje, zonas_prohibidas, horas_negras = gestionar_memoria(leer=True)
 
-print(f"🔱 SISTEMA V41 ACTIVADO | RANGO: {rango} | CAP: ${capital_trabajo:.2f}")
+print(f"🧠 V67: RELOJ MAESTRO ACTIVADO | CAP: ${capital:.2f}")
+print(f"🚫 HORAS BLOQUEADAS POR HISTORIAL: {horas_negras}")
 
 while True:
     try:
         for m in ms:
             s = st[m]
-            px = float(cl.get_symbol_ticker(symbol=m)['price'])
+            tab = analizar_tablero(m, zonas_prohibidas if not s['e'] else None, horas_negras)
+            if not tab: continue
+            px = tab['c']
             
             if not s['e']:
-                print(f"[{rango}] 🔭 Acechando {m} | Cap: ${capital_trabajo:.2f} | X: {8 if capital_trabajo < 16 else 15}", end='\r')
-                tipo, modo, fx = analizar_entrada(m, factor_actual, capital_trabajo)
-                if tipo:
-                    s['e'], s['p'], s['t'], s['modo'], s['x'], s['max'] = True, px, tipo, modo, fx, px
-                    print(f"\n⚡ ¡ATAQUE ESTRATÉGICO! {m} {tipo} | {fx}X | Modo: {modo}")
+                if tab['dist'] > 0.082 and tab['v_mult'] > 2.7 and tab['rechazo'] < 0.22:
+                    if px > tab['e9'] > tab['e27'] and tab['racha'] >= 3: s['t'] = "LONG"
+                    elif px < tab['e9'] < tab['e27'] and tab['racha'] >= 3: s['t'] = "SHORT"
+                    
+                    if s['t']:
+                        s.update({'e': True, 'p': px, 'x': 15, 'max': px, 'be': False, 'adn': tab, 'inicio': time.time()})
+                        print(f"\n⚔️ ATAQUE: {m} | Hora: {datetime.now().strftime('%H:%M')}")
             else:
-                # GESTIÓN DE SALIDA (TRAILING STOP)
-                if s['t'] == "LONG":
-                    roi = ((px - s['p']) / s['p'] * 100 * s['x'])
-                    s['max'] = max(s['max'], px)
-                else: # SHORT
-                    roi = ((s['p'] - px) / s['p'] * 100 * s['x'])
-                    s['max'] = min(s['max'], px) if s['max'] > 0 else px
+                roi = (((px - s['p']) / s['p'] if s['t'] == "LONG" else (s['p'] - px) / s['p']) * 100 * s['x']) - 0.26
+                s['max'] = max(s['max'], px) if s['t'] == "LONG" else (min(s['max'], px) if s['max']>0 else px)
+                retro = abs(s['max'] - px) / s['p'] * 100 * s['x']
+                minutos_transcurridos = int((time.time() - s['inicio']) / 60)
 
-                roi -= 0.25 # Comisiones
-                retroceso = abs(s['max'] - px) / s['p'] * 100 * s['x']
-                
-                print(f"📊 {m} {s['t']} ROI: {roi:.2f}% | Retro: {retroceso:.2f}%", end='\r')
+                if roi > (0.22 if blindaje else 0.45) and not s['be']:
+                    s['be'] = True; print(f"\n🔒 POSICIÓN ASEGURADA")
 
-                # Salida: Profit con Trail o Stop Loss estricto
-                if (roi > 0.40 and retroceso > 0.15) or roi <= -1.2:
+                cruce_contra = (s['t'] == "LONG" and tab['e9'] < tab['e27']) or (s['t'] == "SHORT" and tab['e9'] > tab['e27'])
+
+                if (roi > 0.55 and retro > 0.20) or (s['be'] and roi < 0.05) or roi <= -1.25 or cruce_contra:
                     res = "WIN" if roi > 0 else "LOSS"
-                    capital_trabajo += (capital_trabajo * (roi / 100))
-                    gestionar_memoria(m, s['t'], s['modo'], round(roi, 2), res)
-                    s['e'] = False
-                    print(f"\n✅ CIERRE TÁCTICO | {res} | Capital Actual: ${capital_trabajo:.2f}")
-                    factor_actual, _, rango = gestionar_memoria(leer=True)
+                    capital += (capital * (roi / 100))
+                    
+                    gestionar_memoria(datos={'m': m, 'roi': round(roi, 2), 'res': res, 'dist': s['adn']['dist'], 'duracion': minutos_transcurridos})
+                    
+                    print(f"\n🏁 CIERRE EN {m}: {res} | Cap: ${capital:.2f}")
+                    s['e'], s['t'] = False, ''
+                    capital, modo, blindaje, zonas_prohibidas, horas_negras = gestionar_memoria(leer=True)
 
         time.sleep(0.5)
     except: time.sleep(2)
