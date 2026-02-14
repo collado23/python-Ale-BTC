@@ -2,88 +2,89 @@ import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
-# --- 🧠 1. MEMORIA DE CAPITAL Y ROI (Redis) ---
+# --- 🧠 1. MEMORIA CON APALANCAMIENTO DINÁMICO ---
 r_url = os.getenv("REDIS_URL")
 r = redis.from_url(r_url) if r_url else None
 
 def gestionar_memoria(leer=False, datos=None):
     capital_inicial = 15.77
-    if not r: return capital_inicial, []
+    x_min = 1      # Si perdemos mucho, bajamos a 1x (sin riesgo)
+    x_max = 15     # El techo que me pediste
+    
+    if not r: return capital_inicial, x_min, []
     
     historial = r.lrange("historial_bot", 0, -1)
     
     if leer:
-        if not historial: return capital_inicial, []
-        # Sumamos todos los ROIs guardados para saber el capital actual
-        roi_acumulado = sum(json.loads(t).get('roi', 0) for t in historial)
-        horas_malas = [json.loads(t).get('h') for t in historial if json.loads(t).get('res') == "LOSS"]
-        capital_actual = capital_inicial + (capital_inicial * (roi_acumulado / 100))
-        return capital_actual, list(set(horas_malas))
+        if not historial: return capital_inicial, 5, [] # Empezamos tranqui en 5x
+        
+        cap_acumulado = capital_inicial
+        racha_perdedora = 0
+        horas_malas = []
+        
+        # Leemos el historial para ajustar las X y el Capital
+        for t in reversed(historial):
+            trade = json.loads(t)
+            cap_acumulado *= (1 + (trade.get('roi', 0) / 100))
+            
+            if trade.get('res') == "LOSS":
+                racha_perdedora += 1
+                horas_malas.append(int(trade.get('h', 0)))
+            else:
+                racha_perdedora = 0 # Si gana, resetea la mala racha
+        
+        # LÓGICA DE LAS X: Si pierde, baja. Si gana, sube hasta 15.
+        apalancamiento_actual = max(x_min, x_max - (racha_perdedora * 3)) 
+        
+        return cap_acumulado, apalancamiento_actual, list(set(horas_malas))
     else:
-        # Guardamos el ROI real del trade para que la memoria sea exacta
-        r.lpush("historial_bot", json.dumps({
-            'm': datos['m'], 'roi': datos['roi'], 
-            'res': datos['res'], 'h': time.strftime('%H'),
-            'p_ent': datos.get('p_ent'), 'p_sal': datos.get('p_sal')
-        }))
+        r.lpush("historial_bot", json.dumps(datos))
 
-# --- 📊 2. ANÁLISIS TÉCNICO PRO (EMAs + RSI + ROI) ---
+# --- 📊 2. ESTRATEGIA TÉCNICA (EMAs y RSI) ---
 def analizar_mercado(simbolo, cliente):
     try:
-        # Traemos 100 velas para que las EMAs sean precisas
         klines = cliente.get_klines(symbol=simbolo, interval='5m', limit=100)
         df = pd.DataFrame(klines, columns=['time','open','high','low','close','vol','etc1','etc2','etc3','etc4','etc5','etc6'])
         df['close'] = df['close'].astype(float)
 
-        # A. LAS EMAs (El cruce de tendencia)
-        ema_rapida = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
-        ema_lenta = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
-
-        # B. RSI (Psicología de pánico/euforia)
+        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
+        
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
 
-        # C. DETECTOR DE DESPLOME (Modo Cocodrilo)
         precio_actual = df['close'].iloc[-1]
-        caida = ((precio_actual - df['close'].iloc[-5]) / df['close'].iloc[-5]) * 100
+        caida = ((precio_actual - df['close'].iloc[-4]) / df['close'].iloc[-4]) * 100
 
-        # --- LÓGICA DE DECISIÓN COMPLETA ---
+        # Muerde si hay caída, RSI bajo y el precio está por encima de la vela anterior
+        if caida < -2.0 and rsi < 30 and precio_actual > df['close'].iloc[-2]:
+            return True, precio_actual, f"🐊 ATAQUE! RSI: {rsi:.1f}"
         
-        # Condición Cocodrilo: Desplome + RSI bajo + Cruce de EMAs empezando
-        if caida < -2.0 and rsi < 30:
-            if ema_rapida > ema_lenta * 0.99: # Filtro para asegurar que no siga cayendo al infinito
-                return True, f"🐊 ATAQUE! Caída: {caida:.1f}% | RSI: {rsi:.1f} | EMA 9/21 lista"
-
-        return False, f"Acechando... EMA9: {ema_rapida:.2f} | RSI: {rsi:.1f}"
+        return False, precio_actual, "Acechando..."
     except:
-        return False, "Error de análisis"
+        return False, 0, "Error"
 
-# --- 🚀 3. CONFIGURACIÓN DE PODER (Apalancamiento) ---
-APALANCAMIENTO = 10 # 10x para mover tus $15.77 como si fueran $157
+# --- 🚀 3. EJECUCIÓN CON REGLAS DE ORO ---
+cap_real, x_actual, bloqueos = gestionar_memoria(leer=True)
+print(f"🦁 BOT V92: MODO COCODRILO DINÁMICO")
+print(f"💰 CAP: ${cap_real:.2f} | APALANCAMIENTO: {x_actual}x | MAX: 15x")
 
-# --- 🏁 4. EJECUCIÓN MAESTRA ---
-cap_real, bloqueos = gestionar_memoria(leer=True)
-print(f"🦁 BOT MAESTRO V87 ACTIVADO")
-print(f"💰 CAPITAL REAL: ${cap_real:.2f} | APALANCAMIENTO: {APALANCAMIENTO}x")
-
-presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'ETHUSDT', 'PEPEUSDT']
+presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ADAUSDT']
 
 while True:
     h = int(time.strftime('%H'))
     if h in bloqueos:
-        print(f"⏳ Hora {h} bloqueada por precaución. El Cocodrilo no muerde aquí.")
+        print(f"⏳ Hora {h} bloqueada. El Cocodrilo protege su capital.", end='\r')
         time.sleep(600); continue
 
     for p in presas:
-        puedo, razon = analizar_mercado(p, Client())
-        print(f"🧐 {p}: {razon} | Cap: ${cap_real:.2f}", end='\r')
+        puedo, precio, razon = analizar_mercado(p, Client())
+        print(f"🧐 {p}: {razon} | Cap: ${cap_real:.2f} | X: {x_actual}", end='\r')
         
         if puedo:
-            print(f"\n🚀 [MORDER] Entrando en {p} con {APALANCAMIENTO}x")
-            # Simulamos un trade para la memoria (esto lo hace el bot solo después de operar)
-            # datos_trade = {'m': p, 'roi': 2.5, 'res': 'WIN'} 
-            # gestionar_memoria(False, datos_trade)
+            print(f"\n🚀 [ENTRADA] {p} a {precio} con {x_actual}x y Break-even.")
+            # Al terminar: gestionar_memoria(False, {'m': p, 'roi': 5.0, 'res': 'WIN', 'h': h})
             
     time.sleep(15)
