@@ -2,7 +2,7 @@ import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
-# --- 🧠 1. MEMORIA DE CAPITAL (Redis - Guardián de tus $15.95) ---
+# --- 🧠 1. MEMORIA DE CAPITAL (Redis) ---
 r_url = os.getenv("REDIS_URL")
 r = redis.from_url(r_url) if r_url else None
 
@@ -20,51 +20,54 @@ def gestionar_memoria(leer=False, datos=None):
     else:
         r.lpush("historial_bot", json.dumps(datos))
 
-# --- 📖 2. LIBRERÍA DE VELAS COMPLETA (Price Action) ---
+# --- 📖 2. EL LIBRO DE VELAS COMPLETO ---
 def leer_libro_velas(df):
-    v = df.iloc[-2]      # Vela cerrada
-    v_ant = df.iloc[-3]  # Vela anterior
+    v = df.iloc[-2]
+    v_ant = df.iloc[-3]
     cuerpo = abs(v['c'] - v['o'])
     m_sup = v['h'] - max(v['c'], v['o'])
     m_inf = min(v['c'], v['o']) - v['l']
     
-    # Patrones de Reversión y Continuación
-    martillo = m_inf > (cuerpo * 1.8) and m_sup < (cuerpo * 0.6)
-    martillo_inv = m_sup > (cuerpo * 1.8) and m_inf < (cuerpo * 0.6)
     envolvente_alc = v['c'] > v['o'] and v_ant['c'] < v_ant['o'] and v['c'] > v_ant['o']
     envolvente_baj = v['c'] < v['o'] and v_ant['c'] > v_ant['o'] and v['c'] < v_ant['o']
+    martillo = m_inf > (cuerpo * 1.8) and m_sup < (cuerpo * 0.6)
     
     if (martillo or envolvente_alc) and v['c'] > v['o']: return "ALCISTA"
-    if (martillo_inv or envolvente_baj) and v['c'] < v['o']: return "BAJISTA"
+    if envolvente_baj and v['c'] < v['o']: return "BAJISTA"
     return "NEUTRAL"
 
-# --- 📊 3. ANALISTA SUPERIOR (EMAs + RSI + VELAS) ---
+# --- 📊 3. ANALISTA SUPERIOR (EMA 9/27 + DISTANCIA) ---
 def analista_superior(simbolo, cliente):
     try:
-        k = cliente.get_klines(symbol=simbolo, interval='1m', limit=35)
+        k = cliente.get_klines(symbol=simbolo, interval='1m', limit=40)
         df = pd.DataFrame(k, columns=['t','o','h','l','c','v','ct','qv','nt','tb','tq','i']).apply(pd.to_numeric)
         
-        # Filtros de apoyo
+        # EMAs 9 y 27
         ema9 = df['c'].ewm(span=9).mean().iloc[-1]
-        ema21 = df['c'].ewm(span=21).mean().iloc[-1]
+        ema27 = df['c'].ewm(span=27).mean().iloc[-1]
+        
+        # 📏 Cálculo de Distancia (Mínimo 0.05% de separación para evitar rangos)
+        distancia = abs(ema9 - ema27) / ema27 * 100
+        
         delta = df['c'].diff()
         rsi = 100 - (100 / (1 + (delta.where(delta > 0, 0).mean() / -delta.where(delta < 0, 0).mean())))
-        
         patron = leer_libro_velas(df)
 
-        # Disparo: La Vela manda, el RSI y EMA confirman
-        if patron == "ALCISTA" and rsi < 65 and ema9 >= (ema21 * 0.999):
+        # 🎯 FILTRO DE DISPARO CON DISTANCIA
+        # Necesitamos: Patrón + RSI + EMA9/27 + Distancia > 0.04%
+        if patron == "ALCISTA" and rsi < 65 and ema9 > ema27 and distancia > 0.04:
             return True, "LONG", patron
-        if patron == "BAJISTA" and rsi > 35 and ema9 <= (ema21 * 1.001):
+        
+        if patron == "BAJISTA" and rsi > 35 and ema9 < ema27 and distancia > 0.04:
             return True, "SHORT", patron
             
         return False, None, rsi
     except: return False, None, 50
 
-# --- 🚀 4. MOTOR DE TRADING (15 Segundos) ---
+# --- 🚀 4. MOTOR CON BREAKEVEN Y SIN FRENOS (15s) ---
 cap_total = gestionar_memoria(leer=True)
 operaciones = []
-presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ETHUSDT']
+presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'ETHUSDT', 'PEPEUSDT']
 
 while True:
     t_inicio = time.time()
@@ -72,33 +75,41 @@ while True:
         client = Client()
         ganancia_flotante = 0
 
-        # A. CONTROL DE POSICIONES
         for op in operaciones[:]:
             t = client.get_symbol_ticker(symbol=op['s'])
             p_act = float(t['price'])
             roi = ((p_act - op['p'])/op['p'])*100*op['x'] if op['l']=="LONG" else ((op['p'] - p_act)/op['p'])*100*op['x']
             
-            # X Dinámicas: Subir potencia si ganamos
-            if roi > 0.4: op['x'] = min(15, op['x'] + 1)
-            
+            # 🔥 BREAKEVEEN Y X DINÁMICAS
+            if roi > 0.8: 
+                op['be'] = True
+                op['x'] = min(15, op['x'] + 1)
+
             pnl = op['c'] * (roi / 100)
             ganancia_flotante += pnl
-            
-            if roi >= 1.6 or roi <= -1.2:
-                print(f"\n✅ CIERRE EN {op['s']} | PnL: ${pnl:.2f} | ROI: {roi:.2f}%")
+
+            # 🛡️ SALIDA PROTEGIDA
+            if op.get('be') and roi <= 0.02:
+                print(f"\n🛡️ BREAKEVEN en {op['s']}. Protegiendo capital.")
+                operaciones.remove(op)
+                continue
+
+            # 🏁 CIERRE POR OBJETIVO
+            if roi >= 1.7 or roi <= -1.2:
+                print(f"\n✅ CIERRE EN {op['s']} | ROI: {roi:.2f}% | PnL: ${pnl:.2f}")
                 gestionar_memoria(False, {'roi': roi, 'm': op['s']})
                 operaciones.remove(op)
                 cap_total = gestionar_memoria(leer=True)
 
-        # B. BÚSQUEDA DE ENTRADAS
+        # BÚSQUEDA DE ENTRADAS
         if len(operaciones) < 2:
             for p in presas:
                 if any(o['s'] == p for o in operaciones): continue
                 puedo, lado, motivo = analista_superior(p, client)
                 if puedo:
                     t = client.get_symbol_ticker(symbol=p)
-                    print(f"\n🎯 [DISPARO VELAS]: {p} {lado} | {motivo}")
-                    operaciones.append({'s': p, 'l': lado, 'p': float(t['price']), 'x': 7, 'c': cap_total * 0.45})
+                    print(f"\n🎯 [DISPARO VELAS]: {p} {lado} | {motivo} | EMAs con Distancia ✅")
+                    operaciones.append({'s': p, 'l': lado, 'p': float(t['price']), 'x': 8, 'c': cap_total * 0.45, 'be': False})
                     if len(operaciones) >= 2: break
 
         print(f"💰 BILLETERA: ${cap_total + ganancia_flotante:.2f} | Base: ${cap_total:.2f}          ", end='\r')
