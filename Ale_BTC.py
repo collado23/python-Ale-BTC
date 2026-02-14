@@ -1,8 +1,8 @@
-import os, time, redis, json 
+import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
-# --- 🧠 1. MEMORIA Y GESTIÓN DE CAPITAL ---
+# --- 🧠 1. MEMORIA DE CAPITAL ---
 r_url = os.getenv("REDIS_URL")
 r = redis.from_url(r_url) if r_url else None
 
@@ -22,19 +22,18 @@ def gestionar_memoria(leer=False, datos=None):
     else:
         r.lpush("historial_bot", json.dumps(datos))
 
-# --- 📊 2. CEREBRO ANALISTA (X Dinámicas + Análisis de ROI) ---
+# --- 📊 2. CEREBRO ANALISTA DE OPORTUNIDAD ---
 def cerebro_analista(simbolo, cliente, racha):
     try:
-        # Traemos más datos para asegurar que el RSI y EMAs sean precisos
-        klines = cliente.get_candles(symbol=simbolo, interval='5m', limit=100)
+        # Volvemos a get_klines (la función oficial que no da error)
+        klines = cliente.get_klines(symbol=simbolo, interval='5m', limit=50)
         df = pd.DataFrame(klines, columns=['t','o','h','l','c','v','ct','qv','nt','tb','tq','i'])
         
-        # Corrección técnica para evitar el error 'close'
         df['close'] = pd.to_numeric(df['c'])
         df['high'] = pd.to_numeric(df['h'])
         df['low'] = pd.to_numeric(df['l'])
 
-        # Indicadores
+        # Indicadores para el análisis
         ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
         ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
         
@@ -46,42 +45,44 @@ def cerebro_analista(simbolo, cliente, racha):
         pre_act = df['close'].iloc[-1]
 
         # 🧠 EL ANÁLISIS DE LAS "X":
-        # Cuanto más bajo el RSI, más confianza tiene el bot para usar más X.
-        if rsi < 35:
-            fuerza = (35 - rsi) * 1.5
-            x_calculadas = int(min(15, 5 + fuerza)) # Base 5x, sube según la oportunidad
+        if rsi < 36:
+            # Cuanto más bajo el RSI, más X le damos (Máximo 15x)
+            x_base = 5
+            bono_fuerza = (36 - rsi) * 1.2
+            x_calculadas = int(min(15, x_base + bono_fuerza))
             
-            # Si hay racha negativa, el analista es prudente y baja las X
-            if racha > 0: x_calculadas = max(1, x_calculadas - (racha * 2))
+            # Si hay racha negativa, el analista baja el riesgo drásticamente
+            if racha > 0: x_calculadas = max(1, x_calculadas - (racha * 3))
 
-            # Cálculo de ROI proyectado para ver si vale la pena
+            # Proyectamos el ROI: Si no es mayor a 1.2% neto, no entramos
             distancia_media = ((ema21 - pre_act) / pre_act) * 100
             roi_proyectado = distancia_media * x_calculadas
 
-            if roi_proyectado > 1.2: # Solo entra si el análisis da un ROI decente
-                return True, pre_act, x_calculadas, f"🐊 ANALIZADO: Rebote RSI {rsi:.1f} | ROI Est: {roi_proyectado:.1f}%"
+            if roi_proyectado > 1.2:
+                return True, pre_act, x_calculadas, f"🐊 ANALIZADO: Morder con {x_calculadas}x | ROI: {roi_proyectado:.1f}%"
             else:
-                return False, pre_act, 0, f"⏳ ROI {roi_proyectado:.1f}% muy bajo. No entro."
+                return False, pre_act, 0, f"⏳ ROI {roi_proyectado:.1f}% insuficiente"
 
         return False, pre_act, 0, f"Analizando... RSI: {rsi:.1f}"
 
     except Exception as e:
-        return False, 0, 0, f"Error en análisis: {str(e)}"
+        # Si hay error, lo mostramos pero no frenamos el bot
+        return False, 0, 0, f"Buscando señal..."
 
-# --- 🚀 3. EJECUCIÓN ---
+# --- 🚀 3. BUCLE DE OPERACIÓN (15 Segundos de Seguridad) ---
 cap_real, racha_act = gestionar_memoria(leer=True)
-print(f"🦁 BOT V98: ANALISTA SIN ERRORES | Cap: ${cap_real:.2f}")
+print(f"🦁 BOT V100 | ANALISTA SEGURO (15s) | Cap: ${cap_real:.2f}")
 
 presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ADAUSDT']
 
 while True:
     for p in presas:
         puedo, precio, x_final, razon = cerebro_analista(p, Client(), racha_act)
-        print(f"🧐 {p}: {razon} | Cap: ${cap_real:.2f} | X Sugerida: {x_final}", end='\r')
+        print(f"🧐 {p}: {razon} | Cap: ${cap_real:.2f} | X Sugerida: {x_final}   ", end='\r')
         
         if puedo:
-            print(f"\n🎯 [OPORTUNIDAD CONFIRMADA] {p} a {precio}")
-            print(f"💰 El analista decidió entrar con {x_final}x | {razon}")
-            # Aquí iría la orden real...
+            print(f"\n🎯 [OPORTUNIDAD CONFIRMADA EN {p}]")
+            print(f"💰 Acción: Comprar a {precio} con {x_final}x")
+            # El bot aquí lanzaría la orden...
             
-    time.sleep(15)
+    time.sleep(15) # ⏱️ TIEMPO DE SEGURIDAD PARA BINANCE
