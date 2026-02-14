@@ -36,7 +36,6 @@ def analizar(simbolo, cliente, racha):
         rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
         pre_act = df['close'].iloc[-1]
 
-        # X DINÁMICAS
         x_analizadas = int(min(15, 5 + abs(50 - rsi) * 0.6))
         if racha > 0: x_analizadas = max(1, x_analizadas - (racha * 2))
 
@@ -46,21 +45,25 @@ def analizar(simbolo, cliente, racha):
         return False, None, pre_act, 0, rsi
     except: return False, None, 0, 0, 0
 
-# --- 🚀 3. BUCLE MAESTRO (DOBLE OPERACIÓN) ---
-cap, racha = gestionar_memoria(leer=True)
-operaciones = [] # Lista para manejar hasta 2 compras
-print(f"🦁 BOT V106 | DOBLE MORDIDA | Cap: ${cap:.2f}")
+# --- 🚀 3. BUCLE MAESTRO (CON CAPITAL TOTAL VISIBLE) ---
+cap_total, racha = gestionar_memoria(leer=True)
+operaciones = [] 
+print(f"🦁 BOT V107 | CONTROL DE CAPITAL TOTAL | Inicio: ${cap_total:.2f}")
 
 presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ADAUSDT', 'ETHUSDT']
 
 while True:
-    # A. MONITOREAR OPERACIONES ACTIVAS (G/P)
+    # --- CÁLCULO DE CAPITAL EN TIEMPO REAL (Saldo + Ganancias flotantes) ---
+    ganancia_flotante = 0
+    
+    # A. MONITOREAR OPERACIONES ACTIVAS
     for op in operaciones[:]:
         try:
             ticker = Client().get_symbol_ticker(symbol=op['s'])
             p_act = float(ticker['price'])
             roi = ((p_act - op['p'])/op['p'])*100*op['x'] if op['l']=="LONG" else ((op['p'] - p_act)/op['p'])*100*op['x']
             gan_usd = op['c'] * (roi / 100)
+            ganancia_flotante += gan_usd # Sumamos lo que vamos ganando/perdiendo ahora
             
             status = "🟢 G" if roi >= 0 else "🔴 P"
             print(f"📊 {op['s']} {op['l']} ({op['x']}x) | {status}: ${abs(gan_usd):.2f} ({roi:.2f}%)")
@@ -69,24 +72,25 @@ while True:
                 print(f"\n✅ CIERRE {op['s']} | ROI: {roi:.2f}%")
                 gestionar_memoria(False, {'m': op['s'], 'roi': roi, 'res': 'WIN' if roi > 0 else 'LOSS'})
                 operaciones.remove(op)
-                cap, racha = gestionar_memoria(leer=True)
+                cap_total, racha = gestionar_memoria(leer=True)
         except: continue
 
-    # B. ANALIZAR EL RESTO (Incluso si hay una abierta)
-    if len(operaciones) < 2: # Solo busca si hay menos de 2 abiertas
+    # --- REPORTE DE BILLETERA ---
+    # Este es el dato que pediste: Suma el capital base más la ganancia de las operaciones abiertas
+    print(f"💰 BILLETERA TOTAL: ${cap_total + ganancia_flotante:.2f} (Base: ${cap_total:.2f})")
+
+    # B. ANALIZAR EL RESTO
+    if len(operaciones) < 2: 
         for p in presas:
-            # No analizar lo que ya compramos
             if any(o['s'] == p for o in operaciones): continue
-            
             puedo, lado, precio, x_f, rsi_f = analizar(p, Client(), racha)
             
             if puedo:
-                print(f"\n🎯 [MUESTRA]: {p} analizada {lado} con {x_f}x")
-                # Dividimos el capital: usa el 40% del capital actual para cada una
-                monto_op = cap * 0.4 
+                print(f"\n🎯 [ENTRANDO]: {p} para {lado} con {x_f}x")
+                monto_op = cap_total * 0.4 
                 operaciones.append({'s': p, 'l': lado, 'p': precio, 'x': x_f, 'c': monto_op})
                 if len(operaciones) >= 2: break 
-
-            print(f"🧐 Analizando {p}... RSI: {rsi_f:.1f}   ", end='\r')
+            
+            print(f"🧐 Acechando {p}... RSI: {rsi_f:.1f}   ", end='\r')
 
     time.sleep(15)
