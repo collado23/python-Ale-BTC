@@ -2,36 +2,36 @@ import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
-# --- 🧠 1. MEMORIA DE CAPITAL E HISTORIAL ---
+# --- 🧠 1. MEMORIA DE CAPITAL Y RACHA ---
 r_url = os.getenv("REDIS_URL")
 r = redis.from_url(r_url) if r_url else None
 
 def gestionar_memoria(leer=False, datos=None):
     cap_ini = 15.77
-    if not r: return cap_ini, 10
+    if not r: return cap_ini, 0 # Retornamos racha 0 si no hay redis
     hist = r.lrange("historial_bot", 0, -1)
     if leer:
-        if not hist: return cap_ini, 10
+        if not hist: return cap_ini, 0
         cap_act = cap_ini
+        racha_perdedora = 0
         for t in reversed(hist):
             tr = json.loads(t)
             cap_act *= (1 + (tr.get('roi', 0) / 100))
-        return cap_act, 10 
+            racha_perdedora = racha_perdedora + 1 if tr.get('res') == "LOSS" else 0
+        return cap_act, racha_perdedora
     else:
         r.lpush("historial_bot", json.dumps(datos))
 
-# --- 📊 2. EL CEREBRO: ANÁLISIS DE OPORTUNIDAD + PROYECCIÓN DE ROI ---
-def analizar_con_roi(simbolo, cliente, apalancamiento):
+# --- 📊 2. EL CEREBRO: ANALIZA OPORTUNIDAD + X ÓPTIMAS ---
+def cerebro_analista(simbolo, cliente, racha):
     try:
         klines = cliente.get_klines(symbol=simbolo, interval='5m', limit=100)
         df = pd.DataFrame(klines, columns=['t','o','h','l','c','v','t1','t2','t3','t4','t5','t6'])
         df['close'] = df['close'].astype(float)
-        df['high'] = df['high'].astype(float)
-        df['low'] = df['low'].astype(float)
 
-        # Indicadores de Análisis
-        ema9 = df['close'].ewm(span=9, adjust=False).mean()
-        ema21 = df['close'].ewm(span=21, adjust=False).mean()
+        # Indicadores
+        ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+        ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
         
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -40,47 +40,53 @@ def analizar_con_roi(simbolo, cliente, apalancamiento):
         
         pre_act = df['close'].iloc[-1]
 
-        # 🧠 CÁLCULO DE ROI PROYECTADO
-        # Estimamos la ganancia llegando a la EMA21 (Rebote promedio)
-        target_precio = ema21.iloc[-1]
-        ganancia_estimada_porcentaje = ((target_precio - pre_act) / pre_act) * 100
-        roi_proyectado = ganancia_estimada_porcentaje * apalancamiento
-
-        # 🧠 EL PENSAMIENTO DEL BOT:
+        # 🧠 EL BOT ANALIZA LAS "X" IDEALES:
+        # Empezamos con un cálculo basado en qué tan lejos estamos del RSI extremo
+        # Si RSI es 20, la fuerza es mucha. Si RSI es 34, la fuerza es poca.
+        fuerza_oportunidad = max(0, (35 - rsi) * 2) # A menor RSI, más fuerza
         
-        # Escenario A: Rebote por Pánico (RSI < 35)
-        if rsi < 35:
-            # ANALIZA EL ROI: Si el ROI proyectado es menor al 1.5%, no vale la pena el riesgo
-            if roi_proyectado > 1.5:
-                return True, pre_act, f"🐊 ROI POSITIVO: {roi_proyectado:.2f}% | RSI: {rsi:.1f}"
+        # Ajustamos las X según la racha y la fuerza (Mínimo 1x, Máximo 15x)
+        x_recomendadas = int(min(15, fuerza_oportunidad + 5))
+        
+        # Si venimos de perder, el cerebro aplica un "castigo" de seguridad
+        if racha > 0:
+            x_recomendadas = max(1, x_recomendadas - (racha * 3))
+
+        # 🧠 DECISIÓN ANALÍTICA
+        roi_est = ((ema21 - pre_act) / pre_act) * 100 * x_recomendadas
+
+        # CASO 1: Rebote por Pánico
+        if rsi < 34:
+            if roi_est > 1.5:
+                return True, pre_act, x_recomendadas, f"🐊 ANALIZADO: Morder con {x_recomendadas}x (ROI Est: {roi_est:.1f}%)"
             else:
-                return False, pre_act, f"⏳ ROI Pobre ({roi_proyectado:.2f}%). No arriesgo."
+                return False, pre_act, 0, f"⏳ RSI bajo ({rsi:.1f}) pero ROI insuficiente con {x_recomendadas}x"
 
-        # Escenario B: Tendencia Fuerte
-        if ema9.iloc[-1] > ema21.iloc[-1] and rsi < 60:
-            if pre_act > ema9.iloc[-1]:
-                return True, pre_act, f"🚀 TENDENCIA: ROI Proyectado {roi_proyectado:.2f}%"
+        # CASO 2: Tendencia (Solo si hay fuerza clara)
+        if pre_act > ema9 and ema9 > ema21 and rsi < 60:
+            x_tendencia = min(8, x_recomendadas) # En tendencia somos más conservadores que en rebotes
+            return True, pre_act, x_tendencia, f"🚀 ANALIZADO: Seguir tendencia con {x_tendencia}x"
 
-        return False, pre_act, f"Analizando... RSI: {rsi:.1f} | ROI: {roi_proyectado:.2f}%"
+        return False, pre_act, 0, f"Analizando... RSI: {rsi:.1f} | X Sugeridas: {x_recomendadas}"
 
     except Exception as e:
-        return False, 0, f"Error: {e}"
+        return False, 0, 0, f"Error: {e}"
 
-# --- 🚀 3. BUCLE DE OPERACIÓN ---
-cap_real, x_act = gestionar_memoria(leer=True)
-print(f"🦁 BOT V96 | ANALISTA DE ROI Y OPORTUNIDAD")
-print(f"💰 CAPITAL: ${cap_real:.2f} | X: {x_act}")
+# --- 🚀 3. BUCLE DE EJECUCIÓN ---
+cap_real, racha_actual = gestionar_memoria(leer=True)
+print(f"🦁 BOT V97 | ANALISTA DE RIESGO DINÁMICO")
 
 presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ADAUSDT']
 
 while True:
     for p in presas:
-        puedo, precio, razon = analizar_con_roi(p, Client(), x_act)
+        puedo, precio, x_final, razon = cerebro_analista(p, Client(), racha_actual)
         print(f"🧐 {p}: {razon} | Cap: ${cap_real:.2f}", end='\r')
         
         if puedo:
-            print(f"\n🎯 [MUESTRA DE ANALISIS] {p}")
-            print(f"📊 {razon}")
-            # Aquí el bot dispararía la orden sabiendo exactamente cuánto busca ganar.
+            print(f"\n🎯 [ESTRATEGIA CALCULADA]")
+            print(f"💰 Operando {p} a {precio} usando {x_final}x")
+            print(f"📝 Razón: {razon}")
+            # Ejecutar con x_final...
             
     time.sleep(10)
