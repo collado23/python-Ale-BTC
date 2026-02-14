@@ -2,7 +2,7 @@ import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
-# --- 🧠 1. MEMORIA Y CAPITAL (Arreglado) ---
+# --- 🧠 1. MEMORIA Y CAPITAL (Arreglado) --- 
 r_url = os.getenv("REDIS_URL")
 r = redis.from_url(r_url) if r_url else None
 
