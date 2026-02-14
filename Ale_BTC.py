@@ -1,4 +1,4 @@
-import os, time, redis, json
+import os, time, redis, json 
 import pandas as pd
 from binance.client import Client
 
