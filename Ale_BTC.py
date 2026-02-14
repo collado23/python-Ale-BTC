@@ -6,7 +6,7 @@ from binance.client import Client
 
 # --- CONEXIÓN ---
 def c(): 
-    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
+    return Client(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET')) 
 
 cl = c()
 
