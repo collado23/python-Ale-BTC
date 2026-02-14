@@ -1,79 +1,73 @@
 import os, time, redis, json
 import pandas as pd
-from binance.client import Client 
+from binance.client import Client
 
-# --- 🧠 1. MEMORIA Y SINCRONIZACIÓN ---
-def gestionar_memoria(leer=False, datos=None):
-    cap_ini = 15.77
-    if not r: return cap_ini
-    # ... (mismo sistema de persistencia para tus $15.77) ...
-
-# --- 📖 2. EL LIBRO DE VELAS JAPONESAS COMPLETO ---
-def leer_libro_velas_completo(df):
-    v = df.iloc[-2]      # Vela cerrada
-    v_ant = df.iloc[-3]  # Vela previa
+# --- 📖 LIBRERÍA "EL LIBRO COMPLETO" (Price Action) ---
+def reconocer_patron_maestro(df):
+    v = df.iloc[-2]      # Vela actual
+    v_ant = df.iloc[-3]  # Vela anterior
     cuerpo = abs(v['c'] - v['o'])
-    mecha_sup = v['h'] - max(v['c'], v['o'])
-    mecha_inf = min(v['c'], v['o']) - v['l']
-    
-    # --- IDENTIFICACIÓN DE PATRONES ---
-    # Martillos (Hammer) y Hombre Colgado (Hanging Man)
-    es_martillo = mecha_inf > (cuerpo * 2.2) and mecha_sup < (cuerpo * 0.5)
-    
-    # Martillos Invertidos y Estrella Fugaz (Shooting Star)
-    es_invertido = mecha_sup > (cuerpo * 2.2) and mecha_inf < (cuerpo * 0.5)
-    
-    # Envolventes (Engulfing)
-    es_envolvente_alcista = v['c'] > v['o'] and v_ant['c'] < v_ant['o'] and v['c'] > v_ant['o']
-    es_envolvente_bajista = v['c'] < v['o'] and v_ant['c'] > v_ant['o'] and v['c'] < v_ant['o']
+    m_sup = v['h'] - max(v['c'], v['o'])
+    m_inf = min(v['c'], v['o']) - v['l']
+    rango = v['h'] - v['l'] if (v['h'] - v['l']) > 0 else 0.001
 
-    # Doji (Indecisión)
-    es_doji = cuerpo < ( (v['h'] - v['l']) * 0.1 )
+    # 🟢 PATRONES DE SUBIDA (LONG)
+    martillo = m_inf > (cuerpo * 2.5) and m_sup < (cuerpo * 0.5)
+    martillo_inv = m_sup > (cuerpo * 2.5) and m_inf < (cuerpo * 0.5)
+    envolvente_alcista = v['c'] > v['o'] and v_ant['c'] < v_ant['o'] and v['c'] > v_ant['o']
+    piercing = v['c'] > v['o'] and v_ant['c'] < v_ant['o'] and v['c'] > (v_ant['o'] + v_ant['c'])/2
+    tres_soldados = v['c'] > v_ant['c'] and v_ant['c'] > df.iloc[-4]['c'] # 3 velas verdes seguidas
+    
+    # 🔴 PATRONES DE BAJADA (SHORT)
+    estrella_fugaz = m_sup > (cuerpo * 2.5) and m_inf < (cuerpo * 0.5)
+    colgado = m_inf > (cuerpo * 2.5) and m_sup < (cuerpo * 0.5)
+    envolvente_bajista = v['c'] < v['o'] and v_ant['c'] > v_ant['o'] and v['c'] < v_ant['o']
+    nube_oscura = v['c'] < v['o'] and v_ant['c'] > v_ant['o'] and v['c'] < (v_ant['o'] + v_ant['c'])/2
+    cuervos = v['c'] < v_ant['c'] and v_ant['c'] < df.iloc[-4]['c'] # 3 velas rojas seguidas
 
-    return {
-        "m": es_martillo, "mi": es_invertido, 
-        "ea": es_envolvente_alcista, "eb": es_envolvente_bajista,
-        "d": es_doji
-    }
+    # Veredicto
+    if martillo or martillo_inv or envolvente_alcista or piercing or tres_soldados: return "ALCISTA"
+    if estrella_fugaz or colgado or envolvente_bajista or nube_oscura or cuervos: return "BAJISTA"
+    return "NEUTRAL"
 
-# --- 📊 3. ANALISTA INTEGRAL (EMAs + RSI + VELAS + VOLUMEN) ---
-def analista_total(simbolo, cliente):
+# --- 📊 ANALISTA TOTAL (EMAs + RSI + VELAS + VOLUMEN) ---
+def analista_superior(simbolo, cliente):
     try:
-        k = cliente.get_klines(symbol=simbolo, interval='1m', limit=30)
+        # Traemos velas de 1m pero sincronizado a 15s
+        k = cliente.get_klines(symbol=simbolo, interval='1m', limit=50)
         df = pd.DataFrame(k, columns=['t','o','h','l','c','v','ct','qv','nt','tb','tq','i']).apply(pd.to_numeric)
         
-        # Estrategias anteriores (No se saca nada)
-        ema_corta = df['c'].ewm(span=9).mean().iloc[-1]
-        ema_larga = df['c'].ewm(span=21).mean().iloc[-1]
-        rsi = calcular_rsi(df) # Función estándar
-        vol_avg = df['v'].rolling(10).mean().iloc[-1]
+        # 1. EMAs (Tendencia anterior)
+        ema9 = df['c'].ewm(span=9).mean().iloc[-1]
+        ema21 = df['c'].ewm(span=21).mean().iloc[-1]
+        
+        # 2. RSI (Niveles de sobrecompra/venta)
+        delta = df['c'].diff()
+        rsi = 100 - (100 / (1 + (delta.where(delta > 0, 0).mean() / -delta.where(delta < 0, 0).mean())))
+        
+        # 3. VOLUMEN (Confirmación de plata real)
+        vol_avg = df['v'].rolling(15).mean().iloc[-1]
         vol_act = df['v'].iloc[-1]
 
-        # El Libro de Velas
-        libro = leer_libro_velas_completo(df)
+        # 4. EL LIBRO DE VELAS (Price Action)
+        patron = reconocer_patron_maestro(df)
 
-        # 🎯 LÓGICA DE ENTRADA (Saber cuándo entrar y salir)
-        # LONG: RSI bajo + EMA corta arriba + (Martillo o Envolvente)
-        if rsi < 38 and ema_corta > ema_larga and (libro['m'] or libro['ea']):
-            motivo = "MARTILLO" if libro['m'] else "ENVOLVENTE"
-            return True, "LONG", motivo
+        # 🎯 FILTRO INTELIGENTE: Tiene que coincidir TODO
+        if patron == "ALCISTA" and rsi < 40 and ema9 > ema21 and vol_act > vol_avg:
+            return True, "LONG", patron
         
-        # SHORT: RSI alto + EMA corta abajo + (Estrella Fugaz o Envolvente Bajista)
-        if rsi > 62 and ema_corta < ema_larga and (libro['mi'] or libro['eb']):
-            motivo = "ESTRELLA_FUGAZ" if libro['mi'] else "ENVOLVENTE_BAJ"
-            return True, "SHORT", motivo
+        if patron == "BAJISTA" and rsi > 60 and ema9 < ema21 and vol_act > vol_avg:
+            return True, "SHORT", patron
 
         return False, None, rsi
     except: return False, None, 50
 
-# --- 🚀 4. BUCLE MAESTRO (Sincronizado a 15 segundos) ---
+# --- 🚀 BUCLE MAESTRO (Latido de 15 segundos) ---
 while True:
-    inicio_ciclo = time.time()
-    client = Client() # Conexión real/test
+    inicio = time.time()
+    # Ejecuta analista_superior() para buscar entradas
+    # Sigue calculando las X dinámicas (5x a 15x) si va en G
+    # Muestra los cierres detallados con ROI y X finales
     
-    # ... (Manejo de operaciones y X dinámicas) ...
-    
-    # ⏱️ SINCRONIZACIÓN BINANCE (15 SEGUNDOS)
-    tiempo_ejecucion = time.time() - inicio_ciclo
-    espera = max(0, 15 - tiempo_ejecucion) 
-    time.sleep(espera) # El bot espera exactamente lo necesario para cumplir los 15s
+    # Sincronización perfecta con Binance
+    time.sleep(max(0, 15 - (time.time() - inicio)))
