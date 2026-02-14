@@ -1,6 +1,6 @@
 import os, time, redis, json
 import pandas as pd
-from binance.client import Client
+from binance.client import Client 
 
 # --- 🧠 1. MEMORIA Y CAPITAL ---
 r_url = os.getenv("REDIS_URL")
