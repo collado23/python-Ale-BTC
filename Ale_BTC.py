@@ -1,102 +1,76 @@
 import os, time, redis, json, threading
-from http.server import BaseHTTPRequestHandler, HTTPServer 
-import pandas as pd
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 
-# --- 🌐 1. HEALTH CHECK MINIMALISTA (Para que el hosting no moleste) ---
-class HealthServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def start_health():
-    try:
-        httpd = HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), HealthServer)
-        httpd.serve_forever()
+# --- 🌐 1. SERVER DE SALUD (OBLIGATORIO) ---
+class H(BaseHTTPRequestHandler):
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+def s_h():
+    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
-# --- 🧠 2. MEMORIA (Tus $15.77) ---
-r_url = os.getenv("REDIS_URL")
-r = redis.from_url(r_url) if r_url else None
-
-def gestionar_memoria(leer=False, datos=None):
-    cap_ini = 15.77
-    if not r: return cap_ini
+# --- 🧠 2. MEMORIA REDIS (Tus $15.77) ---
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+def g_m(leer=False, d=None):
+    c_i = 15.77
+    if not r: return c_i
     try:
         if leer:
-            hist = r.lrange("historial_bot", 0, 0) # Solo leemos el último
-            if not hist: return cap_ini
-            return float(json.loads(hist[0]).get('nuevo_cap', cap_ini))
-        else:
-            r.lpush("historial_bot", json.dumps(datos))
-            r.ltrim("historial_bot", 0, 10)
-    except: return cap_ini
+            h = r.get("cap_v142")
+            return float(h) if h else c_i
+        else: r.set("cap_v142", str(d))
+    except: return c_i
 
-# --- 📊 3. ANALISTA (EMA 9/27 + Velas) ---
-def analista(simbolo, cliente):
-    try:
-        k = cliente.get_klines(symbol=simbolo, interval='1m', limit=35) # Bajamos a 35 velas
-        df = pd.DataFrame(k, columns=['t','o','h','l','c','v','ct','qv','nt','tb','tq','i']).apply(pd.to_numeric)
-        c = df['c']
-        ema9 = c.ewm(span=9, adjust=False).mean().iloc[-1]
-        ema27 = c.ewm(span=27, adjust=False).mean().iloc[-1]
-        v, v_ant = df.iloc[-2], df.iloc[-3]
-        
-        env_alc = v['c'] > v['o'] and v_ant['c'] < v_ant['o'] and v['c'] > v_ant['o']
-        env_baj = v['c'] < v['o'] and v_ant['c'] > v_ant['o'] and v['c'] < v_ant['o']
-
-        if env_alc and v['c'] > ema9 and ema9 > (ema27 * 0.999): return True, "LONG"
-        if env_baj and v['c'] < ema9 and ema9 < (ema27 * 1.001): return True, "SHORT"
-        return False, None
-    except: return False, None
-
-# --- 🚀 4. MOTOR LIGERO (1x -> 8x -> 15x) ---
-def bot_run():
-    threading.Thread(target=start_health, daemon=True).start()
-    client = Client()
-    cap_total = gestionar_memoria(leer=True)
-    operaciones = []
-    monedas = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'PEPEUSDT']
-    
-    print(f"🐊 V141 | Capital: ${cap_total:.2f}")
+# --- 🚀 3. MOTOR V142 (1x -> 8x -> 15x) ---
+def bot():
+    threading.Thread(target=s_h, daemon=True).start()
+    c = Client(); cap = g_m(leer=True); ops = []
+    print(f"🦁 V142 | ${cap}")
 
     while True:
-        t_loop = time.time()
+        t_l = time.time()
         try:
-            for op in operaciones[:]:
-                px = float(client.get_symbol_ticker(symbol=op['s'])['price'])
-                diff = (px - op['p'])/op['p'] if op['l']=="LONG" else (op['p'] - px)/op['p']
-                roi = diff * 100 * op['x']
+            # GESTIÓN DE POSICIONES Abiertas
+            for o in ops[:]:
+                p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
+                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
+                roi = diff * 100 * o['x']
                 
-                # Escalada de X (1 -> 8 -> 15)
-                if roi > 0.3 and op['x'] == 1: op['x'] = 8
-                if roi > 0.6 and op['x'] == 8: 
-                    op['x'] = 15
-                    op['be'] = True
+                # Escalada de X (Tu estrategia 1-8-15)
+                if roi > 0.3 and o['x'] == 1: o['x'] = 8; print(f"⚡ {o['s']} 8x")
+                if roi > 0.6 and o['x'] == 8: o['x'] = 15; o['be'] = True; print(f"🔥 {o['s']} 15x")
 
                 # Cierre
-                if (op['be'] and roi <= 0.02) or roi >= 1.6 or roi <= -1.1:
-                    print(f"\n✅ CIERRE {op['s']} | ROI: {roi:.2f}%")
-                    nuevo_cap = cap_total * (1 + (roi/100))
-                    gestionar_memoria(False, {'roi': roi, 'nuevo_cap': nuevo_cap})
-                    operaciones.remove(op)
-                    cap_total = nuevo_cap
+                if (o['be'] and roi <= 0.01) or roi >= 1.6 or roi <= -1.1:
+                    n_c = cap * (1 + (roi/100))
+                    g_m(d=n_c); ops.remove(o); cap = n_c
+                    print(f"✅ FIN {o['s']} | {roi:.2f}%")
 
-            if len(operaciones) < 2:
-                for m in monedas:
-                    if any(o['s'] == m for o in operaciones): continue
-                    puedo, lado = analista(m, client)
-                    if puedo:
-                        px = float(client.get_symbol_ticker(symbol=m)['price'])
-                        print(f"\n🎯 ENTRADA {lado}: {m} (1x)")
-                        operaciones.append({'s':m, 'l':lado, 'p':px, 'x':1, 'c':cap_total*0.45, 'be':False})
+            # BUSCAR ENTRADAS (EMA 9/27 + Velas)
+            if len(ops) < 2:
+                for m in ['BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT']:
+                    if any(x['s'] == m for x in ops): continue
+                    k = c.get_klines(symbol=m, interval='1m', limit=30)
+                    cl = [float(x[4]) for x in k] # Cierres
+                    op = [float(x[1]) for x in k] # Aperturas
+                    
+                    # EMAs rápidas manuales para no cargar librerías
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
+                    v, v_a = cl[-2], cl[-3]
+                    o_v, o_a = op[-2], op[-3]
+
+                    # Señal: Envolvente + EMA
+                    if v > o_v and o_a > cl[-3] and v > o_a and v > e9 and e9 > e27:
+                        ops.append({'s':m,'l':'LONG','p':cl[-1],'x':1,'be':False})
+                        print(f"🎯 LONG {m}")
+                        break
+                    if v < o_v and o_a < cl[-3] and v < o_a and v < e9 and e9 < e27:
+                        ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':1,'be':False})
+                        print(f"🎯 SHORT {m}")
                         break
 
-            print(f"💰 ${cap_total:.2f} | Activas: {len(operaciones)}          ", end='\r')
+            print(f"💰 ${cap:.2f} | Activas: {len(ops)}", end='\r')
+        except: time.sleep(10)
+        time.sleep(max(1, 15 - (time.time() - t_l)))
 
-        except: pass
-        time.sleep(max(1, 15 - (time.time() - t_loop)))
-
-if __name__ == "__main__":
-    bot_run()
+if __name__ == "__main__": bot()
