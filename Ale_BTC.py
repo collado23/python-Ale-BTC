@@ -1,4 +1,4 @@
-import os, time, redis, json 
+import os, time, redis, json
 import pandas as pd
 from binance.client import Client
 
@@ -21,7 +21,7 @@ def gestionar_memoria(leer=False, datos=None):
         return float(cap_act), int(racha)
     else: r.lpush("historial_bot", json.dumps(datos))
 
-# --- 📊 2. CEREBRO ANALISTA (Entrada y X Dinámicas) ---
+# --- 📊 2. CEREBRO DE X DINÁMICAS ---
 def obtener_rsi_rapido(simbolo, cliente):
     try:
         k = cliente.get_klines(symbol=simbolo, interval='1m', limit=14)
@@ -37,7 +37,7 @@ def obtener_rsi_rapido(simbolo, cliente):
 cap_total, racha_act = gestionar_memoria(leer=True)
 operaciones = [] 
 
-print(f"🦁 BOT V110 | DINÁMICO | Cap: ${cap_total:.2f}")
+print(f"🦁 BOT V112 | DETALLE DE CIERRE ACTIVO | Cap: ${cap_total:.2f}")
 
 presas = ['BTCUSDT', 'XRPUSDT', 'SOLUSDT', 'PEPEUSDT', 'ADAUSDT']
 
@@ -46,13 +46,12 @@ while True:
         client = Client()
         ganancia_flotante = 0
 
-        # A. MONITOR DE OPERACIONES (X QUE CAMBIAN)
         for op in operaciones[:]:
             rsi_v = obtener_rsi_rapido(op['s'], client)
             
-            # 🔥 CAMBIO DE X EN VIVO: Si el RSI apoya, sube. Si no, baja.
+            # 🔥 AJUSTE DE X EN VIVO
             fuerza = (rsi_v - 50) if op['l'] == "LONG" else (50 - rsi_v)
-            op['x'] = max(2, min(15, int(5 + (fuerza * 0.3))))
+            op['x'] = max(2, min(15, int(5 + (fuerza * 0.4))))
 
             t = client.get_symbol_ticker(symbol=op['s'])
             p_act = float(t['price'])
@@ -60,33 +59,34 @@ while True:
             pnl = op['c'] * (roi / 100)
             ganancia_flotante += pnl
             
-            status = "🟢 G" if roi >= 0 else "🔴 P"
-            print(f"📊 {op['s']} {op['l']} ({op['x']}x) | {status}: ${abs(pnl):.2f} ({roi:.2f}%)      ", end='\r')
+            status_v = "🟢 G" if roi >= 0 else "🔴 P"
+            print(f"📊 {op['s']} {op['l']} ({op['x']}x) | {status_v}: ${abs(pnl):.2f} ({roi:.2f}%)      ", end='\r')
 
+            # --- 🎯 CIERRE CON DETALLE AMPLIADO ---
             if roi >= 1.6 or roi <= -1.3:
-                print(f"\n✅ CIERRE {op['s']} | Resultado: ${pnl:.2f}")
+                tipo_c = "✅ CIERRE G" if roi > 0 else "❌ CIERRE P"
+                # Mensaje detallado como pediste
+                print(f"\n{tipo_c} {op['s']} | Final: ${abs(pnl):.2f} | ROI: {roi:.2f}% | X Final: {op['x']}x")
+                
                 gestionar_memoria(False, {'m': op['s'], 'roi': roi, 'res': 'WIN' if roi > 0 else 'LOSS'})
                 operaciones.remove(op)
                 cap_total, racha_act = gestionar_memoria(leer=True)
 
-        # B. REPORTE DE BILLETERA
         print(f"💰 BILLETERA: ${cap_total + ganancia_flotante:.2f} | Base: ${cap_total:.2f}          ")
 
-        # C. BUSCAR NUEVAS (Si hay menos de 2)
+        # C. BUSCAR NUEVAS (Si hay espacio)
         if len(operaciones) < 2:
             for p in presas:
                 if any(o['s'] == p for o in operaciones): continue
-                # Análisis simplificado para el ejemplo
                 rsi_e = obtener_rsi_rapido(p, client)
                 if rsi_e < 32 or rsi_e > 68:
                     lado = "LONG" if rsi_e < 32 else "SHORT"
                     t = client.get_symbol_ticker(symbol=p)
-                    print(f"\n🎯 [ENTRADA]: {p} {lado}")
+                    print(f"\n🎯 [ENTRADA]: {p} {lado} (Buscando G)")
                     operaciones.append({'s': p, 'l': lado, 'p': float(t['price']), 'x': 5, 'c': cap_total * 0.4})
                     if len(operaciones) >= 2: break
 
-        time.sleep(15)
+        time.sleep(10)
         
     except Exception as e:
-        print(f"⚠️ Error temporal: {e}")
         time.sleep(5)
