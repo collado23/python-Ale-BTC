@@ -6,7 +6,7 @@ class MemoriaBlindada:
     def __init__(self):
         # Conexión a la memoria externa (Redis)
         try:
-            self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+            self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
         except:
             self.r = None
         
