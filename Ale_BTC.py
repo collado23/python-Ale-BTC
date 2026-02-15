@@ -1,110 +1,96 @@
 import os, time, redis, threading
-import numpy as np
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# --- 🌐 SERVER DE SALUD ---
+# --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
-# --- 🧠 MEMORIA REDIS (Blindada contra reinicios) ---
+# --- 🧠 2. MEMORIA REDIS BLINDADA ---
 r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 def g_m(leer=False, d=None):
-    default = {"cap": 15.77, "ops": [], "bloq": {}}
-    if not r: return default
+    c_i = 15.77
+    if not r: return c_i
     try:
         if leer:
-            v = r.get("mem_v193_final")
-            return eval(v) if v else default
-        else: r.set("mem_v193_final", str(d))
-    except: return default
+            h = r.get("cap_v194")
+            return float(h) if h else c_i
+        else: r.set("cap_v194", str(d))
+    except: return c_i
 
+# --- 🚀 3. MOTOR V194 (Acción de Precio + Velas Japonesas) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client()
+    cap = g_m(leer=True)
+    ops = []
+    bloq = {} # Memoria de errores para no repetir malas entradas
     
-    # Cargar memoria completa
-    m = g_m(leer=True)
-    cap, ops, bloq = m["cap"], m["ops"], m["bloq"]
-    
-    monedas = ['SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT', 'PEPEUSDT']
-    print(f"🚀 V193 CARGADA: TODO INCLUIDO. SIN RECORTES.")
+    print(f"🦁 V194 ACTIVADA | EL RETORNO | ${cap}")
 
     while True:
+        t_l = time.time()
         try:
-            # Guardar estado actual
-            g_m(d={"cap": cap, "ops": ops, "bloq": bloq})
-            
-            # Filtro de corrección: Perdona errores tras 5 min
+            # Limpiar bloqueos de errores (5 minutos)
             ahora = time.time()
-            bloq = {mon: t for mon, t in bloq.items() if ahora - t < 300}
+            bloq = {m: t for m, t in bloq.items() if ahora - t < 300}
 
-            # --- 1. SEGUIMIENTO CON COMISIONES Y BREAKEVEN ---
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
+                # ROI Neto (descontando 0.1% de comisión total)
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
+                roi = (diff * 100 * o['x']) - (0.1 * o['x'])
                 
-                # ROI NETO (Descontando comisión de entrada y salida)
-                roi_n = (diff * 100 * o['x']) - (0.1 * o['x'])
-                
-                # Salto de 6x a 15x
-                if o['x'] == 6 and roi_n > 0.3:
-                    o['x'] = 15; print(f"\n🔥 TURBO 15X: {o['s']}")
+                # Escalada Ultra Rápida (5x a 15x)
+                if roi > 0.2 and o['x'] == 5: 
+                    o['x'] = 15; o['be'] = True
+                    print(f"\n🔥 TURBO 15X: {o['s']}")
 
-                # Activación de Breakeven
-                if roi_n >= 0.7: o['be'] = True
-
-                # Lógica de Cierres
-                if o.get('be') and roi_n <= 0.1: # Cierre Protección
-                    cap += cap * (roi_n / 100)
-                    ops.remove(o); print(f"\n🛡️ BE PROTECT: {o['s']}"); break
-                
-                if roi_n <= -2.5: # Cierre Error (Bloquea para aprender)
-                    cap += cap * (roi_n / 100)
-                    bloq[o['s']] = ahora
-                    ops.remove(o); print(f"\n❌ STOP/BLOQUEO: {o['s']}"); break
-
-                if roi_n >= 2.0: # Cierre Profit
-                    cap += cap * (roi_n / 100)
-                    ops.remove(o); print(f"\n✅ PROFIT: {o['s']} | ${cap:.2f}"); break
-
-            # --- 2. ENTRADA CON LIBRERÍA DE VELAS COMPLETA ---
-            if len(ops) < 1:
-                for s in monedas:
-                    if s in bloq: continue # No entrar donde falló hace poco
+                # Cierre dinámico: Breakeven, Profit rápido o Stop cortito
+                if (o['be'] and roi <= 0.05) or roi >= 1.5 or roi <= -0.9:
+                    # Si perdió, bloqueamos la moneda para aprender del error
+                    if roi <= -0.9: bloq[o['s']] = ahora
                     
-                    k = c.get_klines(symbol=s, interval='1m', limit=30)
-                    op, hi, lo, cl = [np.array([float(x[i]) for x in k]) for i in [1,2,3,4]]
+                    n_c = cap * (1 + (roi/100))
+                    g_m(d=n_c); ops.remove(o); cap = n_c
+                    print(f"\n✅ FIN {o['s']} | NETO: {roi:.2f}% | B: ${cap:.2f}")
+
+            if len(ops) < 2:
+                monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'ETHUSDT', 'BTCUSDT', 'XRPUSDT']
+                for m in monedas:
+                    if any(x['s'] == m for x in ops) or m in bloq: continue
+                    
+                    k = c.get_klines(symbol=m, interval='1m', limit=30)
+                    cl = [float(x[4]) for x in k] # Close
+                    op = [float(x[1]) for x in k] # Open
+                    hi = [float(x[2]) for x in k] # High
+                    lo = [float(x[3]) for x in k] # Low
                     
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
+                    v_c, v_o, v_h, v_l = cl[-2], op[-2], hi[-2], lo[-2] # Vela anterior cerrada
                     
-                    # Anatomía de Vela (Fuerza y Patrón)
-                    cuerpo = abs(cl[-2] - op[-2])
-                    rango = hi[-2] - lo[-2]
-                    sombra_inf = min(op[-2], cl[-2]) - lo[-2]
-                    sombra_sup = hi[-2] - max(op[-2], cl[-2])
+                    # Inteligencia de Velas Japonesas:
+                    cuerpo = abs(v_c - v_o)
+                    rango = v_h - v_l
+                    # Solo entramos si la vela tiene cuerpo (fuerza) y no es pura mecha
+                    fuerza_vela = cuerpo > (rango * 0.5)
+
+                    # Gatillo: Tu lógica original + Anatomía de vela
+                    if v_c > v_o and v_c > e9 and e9 > e27 and fuerza_vela:
+                        ops.append({'s':m,'l':'LONG','p':cl[-1],'x':5,'be':False})
+                        print(f"\n🎯 DISPARO 5x LONG: {m}")
+                        break
                     
-                    # Filtros de calidad de entrada
-                    fuerza = cuerpo > (rango * 0.55) # Vela sólida
-                    no_mecha_loca = sombra_sup < (cuerpo * 0.8) if cl[-2]>op[-2] else sombra_inf < (cuerpo * 0.8)
-
-                    tipo = None
-                    if cl[-2] > e9 > e27 and fuerza and no_mecha_loca:
-                        tipo = "LONG"
-                    elif cl[-2] < e9 < e27 and fuerza and no_mecha_loca:
-                        tipo = "SHORT"
-
-                    if tipo:
-                        p = float(c.get_symbol_ticker(symbol=s)['price'])
-                        ops.append({'s':s, 'l':tipo, 'p':p, 'x':6, 'be':False})
-                        print(f"\n🎯 {tipo} 6X: {s} (Vela Confirmada)")
+                    if v_c < v_o and v_c < e9 and e9 < e27 and fuerza_vela:
+                        ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':5,'be':False})
+                        print(f"\n🎯 DISPARO 5x SHORT: {m}")
                         break
 
-            print(f"B: ${cap:.2f} | O: {len(ops)} | BLOQ: {len(bloq)} | T: {time.strftime('%H:%M:%S')}", end='\r')
-        except: time.sleep(2)
-        time.sleep(2)
+            print(f"💰 ${cap:.2f} | Ops: {len(ops)} | {time.strftime('%H:%M:%S')}", end='\r')
+        except: time.sleep(5)
+        time.sleep(max(1, 10 - (time.time() - t_l)))
 
 if __name__ == "__main__": bot()
