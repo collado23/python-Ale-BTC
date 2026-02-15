@@ -1,108 +1,89 @@
 import os, time, redis
 from binance.client import Client
 
-# --- 🧠 MEMORIA PROPIA (BIBLIOTECA DE ESTRATEGIAS) ---
-mem = {}
-try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
-except: r = None
-
-def mente(k, v=None, ex=None):
-    try:
-        if v is not None:
-            if r: 
-                if ex: r.setex(k, ex, str(v))
-                else: r.set(k, str(v))
-            mem[k] = v
-            return v
-        return r.get(k).decode() if r and r.exists(k) else mem.get(k)
-    except: return mem.get(k)
+# --- 🧠 LÓGICA DE MEMORIA ---
+class MemoriaLógica:
+    def __init__(self):
+        try: self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+        except: self.r = None
+        self.local = {}
+    def escribir(self, k, v, ex=None):
+        if self.r: self.r.setex(k, ex, str(v)) if ex else self.r.set(k, str(v))
+        self.local[k] = v
+    def leer(self, k):
+        if self.r:
+            v = self.r.get(k)
+            if v: return v.decode()
+        return self.local.get(k)
 
 def bot():
     c = Client()
-    cap = float(mente("cap_v227") or 13.22)
+    mem = MemoriaLógica()
+    cap = float(mem.leer("cap_final") or 13.05)
     ops = []
-    
-    print(f"📚 V227 BIBLIOTECA JAPONESA COMPLETA | SALDO: ${cap}")
+
+    print(f"🦁 V231 LÓGICA ESTRUCTURAL | SALDO: ${cap}")
 
     while True:
-        t_ciclo = time.time()
+        t_loop = time.time()
         try:
             tks = {t['symbol']: float(t['price']) for t in c.get_all_tickers()}
             
             for o in ops[:]:
                 p_act = tks[o['s']]
                 diff = (p_act - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']
-                roi = (diff * 100 * o['x']) - (0.12 * o['x'])
+                roi = (diff * 100 * o['x']) - (0.1 * o['x'])
 
-                # Trailing Profit de "Tendencia de Libro"
-                # Solo cerramos si el patrón de velas indica fin de movimiento
-                max_r = float(mente(f"max_{o['s']}") or 0)
-                if roi > max_r: mente(f"max_{o['s']}", roi)
+                # --- 🚀 LÓGICA DE ESCALADA (CUÁNDO METER 15x) ---
+                if o['x'] == 5 and roi > 0.5: # Si ya ganamos el 0.5% con 5x...
+                    # Consultamos al Libro de Velas por fuerza extra
+                    k = c.get_klines(symbol=o['s'], interval='1m', limit=3)
+                    v_ahora = float(k[-1][4]) # Precio cierre actual
+                    v_ante = float(k[-2][4])
+                    
+                    # Si la vela actual sigue confirmando la dirección
+                    if (o['l'] == 'LONG' and v_ahora > v_ante) or (o['l'] == 'SHORT' and v_ahora < v_ante):
+                        o['x'] = 15
+                        print(f"🔥 LÓGICA: Tendencia confirmada. Subiendo a 15x en {o['s']}")
 
-                if (roi > 3.0 and roi < max_r - 1.5) or roi >= 12.0 or roi <= -1.4:
+                # --- LÓGICA DE SALIDA (TRAILING) ---
+                max_r = float(mem.leer(f"max_{o['s']}") or 0)
+                if roi > max_r: mem.escribir(f"max_{o['s']}", roi)
+
+                # Si el 15x falla y baja del pico, cerramos rápido para no perder
+                if roi <= -1.1 or (roi > 1.5 and roi < max_r - 1.0) or roi >= 15.0:
                     cap *= (1 + (roi/100))
-                    mente("cap_v227", cap)
-                    mente(f"lock_{o['s']}", "1", 30)
+                    mem.escribir("cap_final", cap)
+                    mem.escribir(f"block_{o['s']}", "1", 40)
                     ops.remove(o)
-                    print(f"✅ CIERRE ESTRATÉGICO: {roi:.2f}% | BAL: ${cap:.2f}")
+                    print(f"✅ CIERRE LÓGICO: {roi:.2f}% | BAL: ${cap:.2f}")
 
+            # --- LÓGICA DE ENTRADA (EL LIBRO) ---
             if len(ops) < 1:
-                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    if mente(f"lock_{m}"): continue
+                for coin in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
+                    if mem.leer(f"block_{coin}"): continue
                     
-                    # Pedimos historial de 10 velas para analizar todos los patrones del libro
-                    k = c.get_klines(symbol=m, interval='1m', limit=10)
-                    def p_v(i): # Función para leer la "ropa" de cada vela
-                        v = k[i]; o, h, l, cl = float(v[1]), float(v[2]), float(v[3]), float(v[4])
-                        return {'o':o, 'h':h, 'l':l, 'c':cl, 'b':abs(cl-o), 'bull':cl>o, 'r':h-l}
+                    k = c.get_klines(symbol=coin, interval='1m', limit=30)
+                    cl = [float(x[4]) for x in k]
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
-                    v1, v2, v3 = p_v(-2), p_v(-3), p_v(-4) # Las últimas 3 cerradas
+                    # Datos de la última vela (Libro)
+                    v = k[-2]; o_p, h_p, l_p, c_p = float(v[1]), float(v[2]), float(v[3]), float(v[4])
+                    cuerpo = abs(c_p - o_p)
+                    rango = h_p - l_p
 
-                    # EMAs de fondo (Contexto de tendencia)
-                    kl_ema = c.get_klines(symbol=m, interval='1m', limit=30)
-                    cl_ema = [float(x[4]) for x in kl_ema]
-                    e9, e27 = sum(cl_ema[-9:])/9, sum(cl_ema[-27:])/27
-
-                    decision = None
-
-                    # --- 📖 TODO EL LIBRO DE VELAS (Lógica de Mente Propia) ---
-                    
-                    # 1. ANALISIS DE FUERZA (Soldados y Cuervos)
-                    fuerza_alcista = v1['bull'] and v2['bull'] and v3['bull'] and v1['b'] > v2['b']
-                    fuerza_bajista = not v1['bull'] and not v2['bull'] and not v3['bull'] and v1['b'] > v2['b']
-
-                    # 2. ANALISIS DE REVERSIÓN (Martillos, Estrellas, Dojis)
-                    # Martillo o Pinbar (Mecha abajo > 2 veces el cuerpo)
-                    hammer = (v1['l'] < min(v1['o'], v1['c']) - v1['b']*2) and (v1['h'] < max(v1['o'], v1['c']) + v1['b'])
-                    # Estrella Fugaz (Mecha arriba > 2 veces el cuerpo)
-                    shooting_star = (v1['h'] > max(v1['o'], v1['c']) + v1['b']*2) and (v1['l'] > min(v1['o'], v1['c']) - v1['b'])
-
-                    # 3. ANALISIS DE ABSORCIÓN (Envolventes)
-                    engulfing_bull = v1['bull'] and not v2['bull'] and v1['c'] > v2['o'] and v1['o'] < v2['c']
-                    engulfing_bear = not v1['bull'] and v2['bull'] and v1['c'] < v2['o'] and v1['o'] > v2['c']
-
-                    # 4. ANALISIS DE CONTINUIDAD (Harami y Piercing)
-                    harami_bull = v2['b'] > v1['b']*2 and v1['o'] > v2['c'] and v1['c'] < v2['o']
-
-                    # --- GATILLO FINAL (Cruzando todo el conocimiento) ---
-                    if e9 > e27: # Si la tendencia es alcista
-                        if fuerza_alcista or engulfing_bull or (hammer and e9 > e27):
-                            decision = 'LONG'
-                    elif e9 < e27: # Si la tendencia es bajista
-                        if fuerza_bajista or engulfing_bear or (shooting_star and e9 < e27):
-                            decision = 'SHORT'
-
-                    if decision:
-                        ops.append({'s':m,'l':decision,'p':tks[m],'x':5})
-                        print(f"📖 {decision} ACTIVADO | MOTIVO: Patrón Completo Detectado en {m}")
+                    # Lógica de Entrada: Cruce de EMAs + Vela de Decisión (Cuerpo > 60% del rango)
+                    if e9 > e27 and c_p > o_p and cuerpo > (rango * 0.6):
+                        ops.append({'s':coin, 'l':'LONG', 'p':tks[coin], 'x':5})
+                        print(f"🎯 ENTRADA 5x: {coin} (Esperando fuerza para 15x)")
+                        break
+                    if e9 < e27 and c_p < o_p and cuerpo > (rango * 0.6):
+                        ops.append({'s':coin, 'l':'SHORT', 'p':tks[coin], 'x':5})
+                        print(f"🎯 ENTRADA 5x: {coin} (Esperando fuerza para 15x)")
                         break
 
-            print(f"📡 Mente Maestra Operando... ${cap:.2f}", end='\r')
-            
-        except Exception as e:
-            time.sleep(2)
-
-        time.sleep(max(1, 4 - (time.time() - t_ciclo)))
+            print(f"📡 Lógica Activa: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
+        except Exception as e: time.sleep(2)
+        time.sleep(max(1, 4 - (time.time() - t_loop)))
 
 if __name__ == "__main__": bot()
