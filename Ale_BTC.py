@@ -1,82 +1,86 @@
-import os, time, redis, threading
+import os, time, redis
 from binance.client import Client
 
-r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
+# Conexión segura a memoria: si falla, usa memoria local
+try:
+    url = os.getenv("REDIS_URL")
+    r = redis.from_url(url) if url else None
+    if r: r.ping()
+except:
+    r = None
+
+def g_m(k, v=None, ex=None):
+    if not r: return None # Si no hay Redis, no explota
+    try:
+        if v is not None:
+            if ex: r.setex(k, ex, str(v))
+            else: r.set(k, str(v))
+        return r.get(k)
+    except: return None
 
 def bot():
     c = Client()
-    # Saldo real recuperado
-    cap = float(r.get("cap_v216") or 14.03)
+    # Recupera capital de memoria o usa el último conocido de tus logs
+    m_cap = g_m("cap_v217")
+    cap = float(m_cap) if m_cap else 14.04 #
     ops = []
-    print(f"⚡ V216 SCALPER PRO | ANTI-BANEO | ${cap}")
+    
+    print(f"🚀 V217 RADAR ACTIVO | SALDO: ${cap}")
 
     while True:
-        t_inicio = time.time()
+        t_ciclo = time.time()
         try:
-            # --- 1. SCANNER TOTAL (1 sola petición a Binance = NO BANEO) ---
+            # SCANNER DE SEGUNDOS (Eficiente para Binance)
             tks = {t['symbol']: float(t['price']) for t in c.get_all_tickers()}
             
+            # 1. GESTIÓN DE OPERACIONES ABIERTAS
             for o in ops[:]:
-                p_actual = tks[o['s']]
-                diff = (p_actual - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_actual)/o['p']
-                
-                # ROI Neto (Calculando comisión de 15x para no mentir)
+                p_act = tks[o['s']]
+                diff = (p_act - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']
                 roi = (diff * 100 * o['x']) - (0.1 * o['x'])
 
-                # Salto de potencia rápido (0.5% para asegurar el tiro)
-                if roi > 0.5 and o['x'] == 5: 
-                    o['x'] = 15; o['be'] = True
+                # Potencia rápida 15x
+                if roi > 0.4 and o['x'] == 5: o['x'] = 15
 
-                # Cierres rápidos (Scalping puro)
-                cierre = False
-                if roi >= 6.0:
-                    o['m_r'] = max(o.get('m_r', 0), roi)
-                    o['tr'] = True
-                
-                if o.get('tr'):
-                    if roi < (o['m_r'] - 0.4): cierre = True # Si baja un poquito del tope, cobramos
-                elif (o['be'] and roi <= 0.1) or roi <= -0.9:
-                    cierre = True
-                
-                if cierre:
+                # Cierre de Scalping (Rápido para no dormir)
+                if roi >= 5.0 or roi <= -0.85:
                     cap *= (1 + (roi/100))
-                    r.set("cap_v216", str(cap))
-                    r.setex(f"lock_{o['s']}", 45, "1") # Bloqueo cortito de 45 seg
+                    g_m("cap_v217", cap)
+                    g_m(f"l_{o['s']}", "1", 30) # Bloqueo de 30 seg
                     ops.remove(o)
-                    print(f"✅ CIERRE: {roi:.2f}% | BAL: ${cap:.2f}")
+                    print(f"✅ COBRADO: {roi:.2f}% | BAL: ${cap:.2f}")
 
-            # --- 2. MENTE DE SEGUNDOS (Analiza suba/baja instantánea) ---
+            # 2. RADAR DE ENTRADA (Analiza suba/baja en segundos)
             if len(ops) < 1:
-                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT']:
-                    if r.exists(f"lock_{m}"): continue
+                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
+                    if g_m(f"l_{m}"): continue # Salta si está bloqueada
                     
                     p_ahora = tks[m]
-                    p_hace_instante = r.get(f"v_{m}") # Precio que la memoria guardó hace 5 seg
-                    r.setex(f"v_{m}", 10, str(p_ahora)) # Guardamos el de ahora para la próxima
+                    p_prev = g_m(f"p_{m}") # Mira el precio de hace 3 segundos
+                    g_m(f"p_{m}", p_ahora, 10)
                     
-                    if not p_hace_instante: continue
+                    if not p_prev: continue
                     
-                    # ¿Qué tan rápido se movió en estos segundos?
-                    impulso = (p_ahora - float(p_hace_instante)) / float(p_hace_instante) * 100
+                    # CÁLCULO DE VELOCIDAD INSTANTÁNEA
+                    vel = (p_ahora - float(p_prev)) / float(p_prev) * 100
                     
-                    # DISPARO POR INERCIA (Si detecta suba o baja brusca en segundos)
-                    if impulso > 0.06: # SUBE RÁPIDO
-                        ops.append({'s':m,'l':'LONG','p':p_ahora,'x':5,'be':False})
-                        print(f"🚀 SUBIDA DETECTADA: {m} (+{impulso:.3f}%)")
+                    if vel > 0.055: # SUBIDA DETECTADA
+                        ops.append({'s':m,'l':'LONG','p':p_ahora,'x':5})
+                        print(f"📈 ENTRANDO LONG: {m} (VEL: {vel:.3f})")
                         break
                     
-                    if impulso < -0.06: # BAJA RÁPIDO
-                        ops.append({'s':m,'l':'SHORT','p':p_ahora,'x':5,'be':False})
-                        print(f"📉 BAJA DETECTADA: {m} ({impulso:.3f}%)")
+                    if vel < -0.055: # BAJA DETECTADA
+                        ops.append({'s':m,'l':'SHORT','p':p_ahora,'x':5})
+                        print(f"📉 ENTRANDO SHORT: {m} (VEL: {vel:.3f})")
                         break
 
-            print(f"🤖 Vigilando... ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"📡 Radar: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
             
         except Exception as e:
-            time.sleep(5) # Si hay error de conexión, frenamos un poco
+            print(f"\n⚠️ Error: {e}")
+            time.sleep(3)
 
-        # --- 3. TIEMPO DE RESPIRACIÓN (Crucial para Binance) ---
-        # 4 segundos es perfecto: es rápido para scalping pero Binance no lo banea
-        time.sleep(max(1, 4 - (time.time() - t_inicio)))
+        # Ajuste de tiempo para Binance (3 segundos es muy agresivo y seguro)
+        time.sleep(max(1, 3 - (time.time() - t_ciclo)))
 
 if __name__ == "__main__": bot()
