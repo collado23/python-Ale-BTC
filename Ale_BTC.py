@@ -3,7 +3,7 @@ from binance.client import Client
 
 class CerebroContable:
     def __init__(self):
-        try: self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+        try: self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
         except: self.r = None
         self.mem = {}
     def escribir(self, k, v, ex=None):
