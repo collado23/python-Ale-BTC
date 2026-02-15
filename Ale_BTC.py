@@ -3,7 +3,7 @@ from binance.client import Client
 
 # --- 🧠 MEMORIA CONECTADA (Sin errores) ---
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 except:
     r = None
 
