@@ -64,7 +64,7 @@ def bot():
                         break
 
             # PANTALLA ESTILO V170
-            print(f"💰 Billetera: ${cap_sim:.2f} | Ops: {len(ops)} | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"💰 Bi: ${cap_sim:.2f} | Ops: {len(ops)} | {time.strftime('%H:%M:%S')}", end='\r')
 
         except Exception as e:
             # Si hay error de conexión, no se muere, solo espera
