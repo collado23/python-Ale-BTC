@@ -2,7 +2,7 @@ import os, time, redis, threading
 from binance.client import Client
 
 # --- 🧠 MEMORIA REDIS ---
-r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 def g_m(leer=False, d=None):
     c_i = 14.03 
     if not r: return c_i
