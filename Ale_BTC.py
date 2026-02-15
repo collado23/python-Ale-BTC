@@ -3,7 +3,7 @@ from binance.client import Client
 
 # --- 🧠 EL CEREBRO (No es una caja de zapatos) ---
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 except:
     r = None
 
