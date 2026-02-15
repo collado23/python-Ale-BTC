@@ -1,95 +1,71 @@
-import os, time, redis, json, threading
-from http.server import BaseHTTPRequestHandler, HTTPServer 
+import os, time, redis, threading
 from binance.client import Client
 
-# --- 🌐 SERVER DE SALUD ---
-class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
-def s_h():
-    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
-    except: pass
-
-# --- 🧠 MEMORIA CON LÓGICA DE RACHA ---
+# --- 🧠 MEMORIA ESTRATÉGICA (No es caja de zapatos) ---
 r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 
-def g_m(leer=False, d=None):
-    c_i = 12.36 # Tu saldo actual según el último log
-    if not r: return c_i
-    try:
-        if leer:
-            h = r.get("saldo_eterno_ale")
-            return float(h) if h else c_i
-        else:
-            # Guardamos el saldo previo para saber si venimos perdiendo
-            actual = r.get("saldo_eterno_ale")
-            if actual: r.set("saldo_previo", actual)
-            r.set("saldo_eterno_ale", str(d))
-    except: return c_i
-
-# --- 🚀 MOTOR V243 (Cruce de Recuperación) ---
 def bot():
-    threading.Thread(target=s_h, daemon=True).start()
-    c = Client(); cap = g_m(leer=True); ops = []
+    c = Client()
+    cap = float(r.get("saldo_eterno_ale") or 11.83)
+    ops = []
     
-    # Verificamos si venimos de pérdida
-    saldo_p = float(r.get("saldo_previo") or cap) if r else cap
-    en_perdida = cap < saldo_p
-    
-    print(f"🦁 V243 MATEMÁTICA | SALDO: ${cap:.2f} | MODO: {'RECUPERACIÓN' if en_perdida else 'ESTÁNDAR'}")
+    print(f"⚔️ V247 CONFLUENCIA REAL | SALDO: ${cap:.2f}")
 
     while True:
         t_l = time.time()
         try:
+            # 1. GESTIÓN DE SALIDA (Lógica de Reacción)
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
-                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi = (diff * 100 * o['x']) - (0.12 * o['x'])
+                roi = (((p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']) * 100 * o['x']) - (0.12 * o['x'])
+
+                # ¿Qué dice el libro mientras estamos adentro?
+                k = c.get_klines(symbol=o['s'], interval='1m', limit=2)
+                v_ahora = k[-1]; op_v, cl_v = float(v_ahora[1]), float(v_ahora[4])
                 
-                # --- 📉 LÓGICA PARA SUBIR EL 15X (Solo si la matemática da) ---
-                if o['x'] == 5 and roi > 0.45:
-                    k = c.get_klines(symbol=o['s'], interval='1m', limit=10)
-                    cuerpos = [abs(float(x[4]) - float(x[1])) for x in k]
-                    avg_cuerpo = sum(cuerpos) / len(cuerpos)
-                    cuerpo_actual = abs(float(k[-1][4]) - float(k[-1][1]))
-                    
-                    # Solo sube si la vela actual es un 50% más fuerte que el promedio
-                    if cuerpo_actual > (avg_cuerpo * 1.5):
-                        o['x'] = 15; o['be'] = True
-                        print(f"🔥 MATEMÁTICA CONFIRMADA: Subiendo a 15x en {o['s']}")
+                # Si el libro muestra debilidad (vela contraria), cerramos aunque falte para el stop
+                if (o['l'] == 'LONG' and cl_v < op_v) or (o['l'] == 'SHORT' and cl_v > op_v):
+                    if roi < -0.4: # Si ya viene mal y la vela cambia, afuera.
+                        cap *= (1 + (roi/100))
+                        r.set("saldo_eterno_ale", str(cap))
+                        ops.remove(o)
+                        print(f"⚠️ LIBRO AVISA CAMBIO: Cerrando para proteger ${cap:.2f}")
 
-                # Cierre con protección (Si venimos perdiendo, el stop es más corto)
-                stop_loss = -0.9 if en_perdida else -1.2
-                if (o['be'] and roi <= 0.1) or roi >= 10.0 or roi <= stop_loss:
-                    n_c = cap * (1 + (roi/100))
-                    g_m(d=n_c); ops.remove(o); cap = n_c
-                    print(f"✅ CIERRE LÓGICO | SALDO ACTUALIZADO: ${cap:.2f}")
-
-            if len(ops) < 2:
+            # 2. ENTRADA POR CONFLUENCIA (EMAs + LIBRO)
+            if len(ops) < 1: # Concentramos el capital en un solo tiro bueno
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    if any(x['s'] == m for x in ops): continue
-                    
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
+                    
+                    # --- LAS EMAs (El Mapa) ---
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
-                    
-                    # Libro de Velas: Acción de precio
-                    v = k[-2]; op_v, cl_v = float(v[1]), float(v[4])
-                    
-                    # Si venimos perdiendo, exigimos que el cruce de EMAs sea más amplio
-                    separacion = abs(e9 - e27) / e27
-                    exigencia = 0.0008 if en_perdida else 0.0005
+                    distancia = abs(e9 - e27) / e27 * 100
 
-                    if e9 > e27 and cl_v > op_v and separacion > exigencia:
-                        ops.append({'s':m,'l':'LONG','p':cl[-1],'x':5,'be':False})
-                        print(f"🎯 DISPARO ESTRATÉGICO 5x: {m}")
+                    # --- EL LIBRO DE VELAS (El Gatillo) ---
+                    v = k[-2] # Última vela cerrada
+                    op_v, hi_v, lo_v, cl_v = float(v[1]), float(v[2]), float(v[3]), float(v[4])
+                    cuerpo = abs(cl_v - op_v)
+                    rango = hi_v - lo_v
+                    # El libro exige: Cuerpo > 80% de la vela (Fuerza Marubozu)
+                    vela_de_poder = cuerpo > (rango * 0.8)
+
+                    # --- LA MEMORIA (El Filtro de Calidad) ---
+                    # Si venimos perdiendo (cap < 12), exigimos que las EMAs estén bien separadas
+                    exigencia_ema = 0.04 if cap < 12 else 0.02
+
+                    # CRUCE DE LÓGICAS:
+                    if e9 > e27 and cl_v > op_v and vela_de_poder and distancia > exigencia_ema:
+                        ops.append({'s':m,'l':'LONG','p':float(c.get_symbol_ticker(symbol=m)['price']),'x':15,'be':True})
+                        print(f"🎯 CONFLUENCIA LONG: EMAs separadas + Libro de Poder en {m}")
                         break
-                    if e9 < e27 and cl_v < op_v and separacion > exigencia:
-                        ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':5,'be':False})
-                        print(f"🎯 DISPARO ESTRATÉGICO 5x: {m}")
+                    
+                    if e9 < e27 and cl_v < op_v and vela_de_poder and distancia > exigencia_ema:
+                        ops.append({'s':m,'l':'SHORT','p':float(c.get_symbol_ticker(symbol=m)['price']),'x':15,'be':True})
+                        print(f"🎯 CONFLUENCIA SHORT: EMAs separadas + Libro de Poder en {m}")
                         break
 
-            print(f"💰 ${cap:.2f} | Memoria: {'PERDIDA' if en_perdida else 'OK'} | {time.strftime('%H:%M:%S')}", end='\r')
-        except: time.sleep(5)
-        time.sleep(max(1, 8 - (time.time() - t_l)))
+            print(f"💰 ${cap:.2f} | EMAs + Libro: Buscando entrada perfecta... | {time.strftime('%H:%M:%S')}", end='\r')
+        except: time.sleep(2)
+        time.sleep(max(1, 5 - (time.time() - t_l)))
 
 if __name__ == "__main__": bot()
