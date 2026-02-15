@@ -1,84 +1,74 @@
 import os, time, redis
 from binance.client import Client
 
-# --- 🧠 MEMORIA CONECTADA (Sin errores) ---
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 except:
     r = None
 
-def get_mem(k, d):
-    if r:
-        try:
-            v = r.get(k)
-            return v.decode() if v else d
-        except: return d
-    return d
-
-# --- 🚀 MOTOR DE RAZONAMIENTO ---
 def bot():
     c = Client()
-    cap = float(get_mem("saldo_eterno_ale", 10.66))
-    last_res = get_mem("ultimo_resultado", "WIN") # Lee si la última fue pérdida
-    
-    print(f"🧠 V260 RAZONANDO | SALDO: ${cap:.2f} | MODO: {last_res}")
+    cap = float(r.get("saldo_eterno_ale") or 9.90) if r else 9.90
+    print(f"🧠 V500 RAZONAMIENTO ESTRUCTURAL | SALDO: ${cap:.2f}")
 
     ops = []
     while True:
         t_l = time.time()
         try:
-            # 1. GESTIÓN DE SALIDA (No regalar comisiones)
+            # 1. GESTIÓN DE POSICIÓN (Razonamiento de Supervivencia)
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 roi = (((p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']) * 100 * o['x']) - (0.15 * o['x'])
 
-                # Si el Libro dice que la vela cambió, pero el ROI es muy bajo, aguantamos un poco
-                k = c.get_klines(symbol=o['s'], interval='1m', limit=2)
-                v_act = k[-1]; cl_v, op_v = float(v_act[4]), float(v_act[1])
-                cambio = (o['l'] == 'LONG' and cl_v < op_v) or (o['l'] == 'SHORT' and cl_v > op_v)
+                # RAZONAMIENTO: Si el precio rompe la estructura que nos metió, cerramos YA.
+                k = c.get_klines(symbol=o['s'], interval='1m', limit=5)
+                # Si estamos en SHORT y el precio supera el máximo de las últimas 3 velas, la lógica falló.
+                highs = [float(x[2]) for x in k[-4:-1]]
+                lows = [float(x[3]) for x in k[-4:-1]]
 
-                if (cambio and roi < -0.5) or roi >= 8.0 or roi <= -1.2:
-                    res = "WIN" if roi > 0 else "LOSS"
+                stop_estructural = (o['l'] == 'LONG' and p_a < min(lows)) or (o['l'] == 'SHORT' and p_a > max(highs))
+
+                if stop_estructural or roi >= 7.0 or roi <= -1.2:
                     cap *= (1 + (roi/100))
-                    if r:
-                        r.set("saldo_eterno_ale", str(cap))
-                        r.set("ultimo_resultado", res)
-                        if res == "LOSS": r.set(f"bloqueo_{o['s']}", "1", ex=480) # Castigo de 8 min
+                    if r: r.set("saldo_eterno_ale", str(cap))
                     ops.remove(o)
-                    print(f"✅ CIERRE {res} | SALDO: ${cap:.2f}")
+                    print(f"🔄 RAZONAMIENTO: Estructura rota. Cierre en {o['s']} | Saldo: ${cap:.2f}")
 
-            # 2. ENTRADA CON LÓGICA DE ESCARMIENTO
+            # 2. ENTRADA POR ACCIÓN DE PRECIO (El Programa Piensa)
             if len(ops) < 1:
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    if r and r.get(f"bloqueo_{m}"): continue # No entrar donde perdimos recién
-
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
+                    
+                    # EMAs para tendencia de fondo
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
-                    # El Libro de Velas (Confirmación de Dirección)
-                    v_c = k[-2]; o_c, c_c = float(v_c[1]), float(v_c[4])
-                    fuerza = abs(c_c - o_c) / o_c * 100
-
-                    # --- EL RAZONAMIENTO ---
-                    # Si venimos de pérdida, la separación de EMAs tiene que ser mayor (0.06%)
-                    # y la vela del libro tiene que ser "gigante" (0.15%)
-                    min_ema = 0.06 if last_res == "LOSS" else 0.03
-                    min_vela = 0.15 if last_res == "LOSS" else 0.08
+                    # RAZONAMIENTO: Buscamos "Velas de Intención"
+                    v1, v2 = k[-2], k[-1]
+                    c_v1, o_v1 = float(v1[4]), float(v1[1])
+                    c_v2, o_v2 = float(v2[4]), float(v2[1])
                     
-                    separacion = abs(e9 - e27) / e27 * 100
+                    # ¿El mercado está haciendo escalones? (Estructura)
+                    alcista = c_v1 > o_v1 and c_v2 > o_v2 and c_v2 > c_v1
+                    bajista = c_v1 < o_v1 and c_v2 < o_v2 and c_v2 < c_v1
 
-                    if e9 > e27 and c_c > o_c and separacion > min_ema and fuerza > min_vela:
-                        ops.append({'s':m, 'l':'LONG', 'p':float(c.get_symbol_ticker(symbol=m)['price']), 'x':15})
-                        print(f"🎯 DISPARO PENSADO LONG: {m}")
+                    # Filtro de Fuerza: La vela tiene que ser sólida (80% cuerpo)
+                    cuerpo_v2 = abs(c_v2 - o_v2)
+                    rango_v2 = float(v2[2]) - float(v2[3])
+                    fuerza_real = cuerpo_v2 > (rango_v2 * 0.8)
+
+                    # SOLO DISPARA SI LA EMA Y LA ESTRUCTURA COINCIDEN
+                    if e9 > e27 and alcista and fuerza_real:
+                        ops.append({'s':m, 'l':'LONG', 'p':c_v2, 'x':15})
+                        print(f"🎯 RAZONADO: Tendencia + Estructura LONG en {m}")
                         break
                     
-                    if e9 < e27 and c_c < o_c and separacion > min_ema and fuerza > min_vela:
-                        ops.append({'s':m, 'l':'SHORT', 'p':float(c.get_symbol_ticker(symbol=m)['price']), 'x':15})
-                        print(f"🎯 DISPARO PENSADO SHORT: {m}")
+                    if e9 < e27 and bajista and fuerza_real:
+                        ops.append({'s':m, 'l':'SHORT', 'p':c_v2, 'x':15})
+                        print(f"🎯 RAZONADO: Tendencia + Estructura SHORT en {m}")
                         break
 
-            print(f"💰 ${cap:.2f} | {last_res} | Razonando... | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"💰 ${cap:.2f} | Analizando Estructura... | {time.strftime('%H:%M:%S')}", end='\r')
         except: time.sleep(2)
         time.sleep(max(1, 5 - (time.time() - t_l)))
 
