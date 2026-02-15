@@ -1,42 +1,56 @@
-import os, time, threading
+import os, time, redis, threading
 from binance.client import Client
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # --- 🌐 SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")  
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
+# --- 🧠 MEMORIA REDIS (Para el Simulador) ---
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+def g_m(leer=False, d=None):
+    # Si no hay Redis, arranca en 15.77 por defecto
+    default = {"cap": 15.77, "ops": []}
+    if not r: return default
+    try:
+        if leer:
+            v = r.get("mem_sim_v175")
+            return eval(v) if v else default
+        else:
+            r.set("mem_sim_v175", str(d))
+    except: return default
+
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
+    c = Client()
     
-    # --- CONFIGURACIÓN DEL SIMULADOR ---
-    c = Client() 
-    cap_sim = 15.77  # Tu capital de prueba
-    ops = []
-    # Tus 6 monedas elegidas
+    # Cargar datos de la memoria
+    datos = g_m(leer=True)
+    cap_sim = datos["cap"]
+    ops = datos["ops"]
+    
     monedas = ['SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'LINKUSDT', 'PEPEUSDT']
 
-    print(f"🚀 SIMULADOR V175.1 - BIDI - 6X/15X")
+    print(f"🚀 SIMULADOR V175.2 - CON MEMORIA - 6X/15X")
 
     while True:
         try:
+            # Guardar estado en cada ciclo
+            g_m(d={"cap": cap_sim, "ops": ops})
+
             # --- SEGUIMIENTO SIMULADO ---
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
-                
-                # ROI Neto (Dirección + Comisiones)
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 roi_n = (diff * 100 * o['x']) - (0.1 * o['x'])
                 
-                # Salto a 15x
                 if roi_n > 0.25 and o['x'] == 6:
                     o['x'] = 15
                     print(f"\n🔥 [SIM] 15X: {o['s']} ({o['l']})")
 
-                # Cierre
                 if roi_n >= 2.5 or roi_n <= -1.3:
                     ganancia = cap_sim * (roi_n / 100)
                     cap_sim += ganancia
@@ -59,7 +73,6 @@ def bot():
                         print(f"\n🎯 [SIM] {tipo} 6X: {m}")
                         break
 
-            # Pantalla ultra resumida como pediste
             print(f"B: ${cap_sim:.2f} | O: {len(ops)} | T: {time.strftime('%H:%M:%S')}", end='\r')
 
         except:
@@ -67,5 +80,4 @@ def bot():
         
         time.sleep(10)
 
-if __name__ == "__main__":
-    bot()
+if __name__ == "__main__": bot()
