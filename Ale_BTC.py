@@ -49,7 +49,7 @@ def bot():
             # --- PUNTO 2: UNA SOLA OPERACIÓN ---
             if len(ops) < 1:
                 # Monedas de tu código original
-                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'ETHUSDT', 'BTCUSDT']:
+                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT']:
                     if any(x['s'] == m for x in ops): continue
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
