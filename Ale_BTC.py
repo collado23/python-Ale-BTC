@@ -1,86 +1,86 @@
 import os, time, redis
 from binance.client import Client
 
-# Conexión segura a memoria: si falla, usa memoria local
+# --- 🧠 MEMORIA DE TRABAJO ---
+mem_interna = {}
 try:
-    url = os.getenv("REDIS_URL")
-    r = redis.from_url(url) if url else None
-    if r: r.ping()
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 except:
     r = None
 
-def g_m(k, v=None, ex=None):
-    if not r: return None # Si no hay Redis, no explota
+def mente(k, v=None, ex=None):
     try:
         if v is not None:
-            if ex: r.setex(k, ex, str(v))
-            else: r.set(k, str(v))
-        return r.get(k)
-    except: return None
+            if r: 
+                if ex: r.setex(k, ex, str(v))
+                else: r.set(k, str(v))
+            mem_interna[k] = v
+            return v
+        return r.get(k) if r else mem_interna.get(k)
+    except: return mem_interna.get(k)
 
 def bot():
     c = Client()
-    # Recupera capital de memoria o usa el último conocido de tus logs
-    m_cap = g_m("cap_v217")
-    cap = float(m_cap) if m_cap else 14.04 #
+    cap = float(mente("cap_v219") or 14.04)
     ops = []
     
-    print(f"🚀 V217 RADAR ACTIVO | SALDO: ${cap}")
+    print(f"🚀 V219 CAZADOR | AGRESIVO Y RÁPIDO | ${cap}")
 
     while True:
         t_ciclo = time.time()
         try:
-            # SCANNER DE SEGUNDOS (Eficiente para Binance)
+            # Una sola petición para no ser baneado
             tks = {t['symbol']: float(t['price']) for t in c.get_all_tickers()}
             
-            # 1. GESTIÓN DE OPERACIONES ABIERTAS
             for o in ops[:]:
                 p_act = tks[o['s']]
                 diff = (p_act - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']
-                roi = (diff * 100 * o['x']) - (0.1 * o['x'])
+                roi = (diff * 100 * o['x']) - (0.12 * o['x']) # Comisión real ajustada
 
-                # Potencia rápida 15x
-                if roi > 0.4 and o['x'] == 5: o['x'] = 15
+                # Salto a 15x si va bien
+                if roi > 0.35 and o['x'] == 5: o['x'] = 15
 
-                # Cierre de Scalping (Rápido para no dormir)
-                if roi >= 5.0 or roi <= -0.85:
+                # CIERRE: Solo si hay ganancia real o pérdida de protección
+                # Subimos el Stop Loss a -1.2% para que no te saque al primer respiro
+                if roi >= 6.0 or roi <= -1.2 or (roi > 0.5 and diff < -0.02):
                     cap *= (1 + (roi/100))
-                    g_m("cap_v217", cap)
-                    g_m(f"l_{o['s']}", "1", 30) # Bloqueo de 30 seg
+                    mente("cap_v219", cap)
+                    mente(f"bloqueo_{o['s']}", "1", 20) # Bloqueo corto de 20 seg
                     ops.remove(o)
-                    print(f"✅ COBRADO: {roi:.2f}% | BAL: ${cap:.2f}")
+                    print(f"💰 CIERRE {o['s']} | ROI: {roi:.2f}% | BAL: ${cap:.2f}")
 
-            # 2. RADAR DE ENTRADA (Analiza suba/baja en segundos)
+            # RADAR DE ENTRADA (Sensibilidad aumentada)
             if len(ops) < 1:
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    if g_m(f"l_{m}"): continue # Salta si está bloqueada
+                    if mente(f"bloqueo_{m}"): continue
                     
                     p_ahora = tks[m]
-                    p_prev = g_m(f"p_{m}") # Mira el precio de hace 3 segundos
-                    g_m(f"p_{m}", p_ahora, 10)
+                    p_hace_poco = mente(f"h_{m}")
+                    mente(f"h_{m}", p_ahora, 15)
                     
-                    if not p_prev: continue
+                    if not p_hace_poco: continue
                     
-                    # CÁLCULO DE VELOCIDAD INSTANTÁNEA
-                    vel = (p_ahora - float(p_prev)) / float(p_prev) * 100
+                    # Analizamos la VELOCIDAD en segundos
+                    impulso = (p_ahora - float(p_hace_poco)) / float(p_hace_poco) * 100
                     
-                    if vel > 0.055: # SUBIDA DETECTADA
+                    # GATILLO MÁS SENSIBLE (0.04% en vez de 0.06%)
+                    # Si el precio se mueve un poquito, el bot ya muerde.
+                    if impulso > 0.04: 
                         ops.append({'s':m,'l':'LONG','p':p_ahora,'x':5})
-                        print(f"📈 ENTRANDO LONG: {m} (VEL: {vel:.3f})")
+                        print(f"🔥 CAZANDO SUBIDA: {m} (+{impulso:.3f}%)")
                         break
                     
-                    if vel < -0.055: # BAJA DETECTADA
+                    if impulso < -0.04:
                         ops.append({'s':m,'l':'SHORT','p':p_ahora,'x':5})
-                        print(f"📉 ENTRANDO SHORT: {m} (VEL: {vel:.3f})")
+                        print(f"📉 CAZANDO BAJA: {m} ({impulso:.3f}%)")
                         break
 
-            print(f"📡 Radar: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"📡 Radar Activo: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
             
         except Exception as e:
-            print(f"\n⚠️ Error: {e}")
-            time.sleep(3)
+            time.sleep(2)
 
-        # Ajuste de tiempo para Binance (3 segundos es muy agresivo y seguro)
+        # Ritmo de 3 segundos (Más rápido para scalping de reacción)
         time.sleep(max(1, 3 - (time.time() - t_ciclo)))
 
 if __name__ == "__main__": bot()
