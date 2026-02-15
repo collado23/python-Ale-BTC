@@ -4,7 +4,7 @@ from binance.client import Client
 # --- 🧠 LÓGICA DE MEMORIA ---
 class MemoriaLógica:
     def __init__(self):
-        try: self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+        try: self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
         except: self.r = None
         self.local = {}
     def escribir(self, k, v, ex=None):
