@@ -1,100 +1,100 @@
-import os, time, redis
+import os, time, redis, json, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
 
-# --- 🧠 LÓGICA DE PERSISTENCIA TOTAL ---
-class MemoriaBlindada:
-    def __init__(self):
-        # Conexión a la memoria externa (Redis)
-        try:
-            self.r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
-        except:
-            self.r = None
-        
-    def set(self, clave, valor, expira=None):
-        if self.r:
-            self.r.set(clave, str(valor))
-            if expira: self.r.expire(clave, expira)
+# --- 🌐 1. SERVER DE SALUD (Tu original) ---
+class H(BaseHTTPRequestHandler):
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+def s_h():
+    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
+    except: pass
 
-    def get(self, clave, default=None):
-        if self.r:
-            v = self.r.get(clave)
-            return v.decode() if v else default
-        return default
+# --- 🧠 2. CRUCE DE MEMORIA (Persistencia Real) ---
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 
+def get_cap():
+    # El bot busca el saldo guardado por el programa anterior. 
+    # Si no hay nada (primera vez), usa 12.85 que es tu saldo actual.
+    default = 12.85
+    if not r: return default
+    try:
+        val = r.get("saldo_eterno_ale")
+        return float(val) if val else default
+    except: return default
+
+def save_cap(valor):
+    if r: r.set("saldo_eterno_ale", str(valor))
+
+# --- 🚀 3. MOTOR CRUZADO (Tu V143 + Lógica de Velas) ---
 def bot():
+    threading.Thread(target=s_h, daemon=True).start()
     c = Client()
-    db = MemoriaBlindada()
-
-    # --- 1. RECUPERAR INFORMACIÓN GUARDADA ---
-    # Aunque cambies el código, si 'saldo_eterno' existe en Redis, lo usa.
-    cap = float(db.get("saldo_eterno", 12.85))
+    cap = get_cap() # Carga la memoria
     ops = []
-
-    print(f"🧠 MEMORIA BLINDADA V237 | RECUPERADO: ${cap}")
+    
+    print(f"🦁 V241 CRUCE FINAL | MEMORIA ACTIVA | SALDO: ${cap}")
 
     while True:
-        t_ciclo = time.time()
+        t_l = time.time()
         try:
-            tks = {t['symbol']: float(t['price']) for t in c.get_all_tickers()}
-            
+            # --- LÓGICA DE GESTIÓN (Tu código con esteroides) ---
             for o in ops[:]:
-                p_act = tks[o['s']]
-                # Lógica Contable con comisiones de Binance
-                roi = (((p_act - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']) * 100 * o['x']) - (0.12 * o['x'])
+                p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
+                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
+                
+                # ROI Neto: Descontamos la comisión de Binance (0.12% aprox en 15x)
+                roi = (diff * 100 * o['x']) - (0.12 * o['x'])
+                
+                # LÓGICA DE ESCALADA (CUÁNDO LA SUBE):
+                # Solo pasa a 15x si hay ROI positivo y el Libro confirma fuerza de vela
+                if roi > 0.3 and o['x'] == 5:
+                    k = c.get_klines(symbol=o['s'], interval='1m', limit=2)
+                    v = k[-1]; op_v, cl_v = float(v[1]), float(v[4])
+                    # Confirmación por color de vela
+                    if (o['l'] == 'LONG' and cl_v > op_v) or (o['l'] == 'SHORT' and cl_v < op_v):
+                        o['x'] = 15; o['be'] = True
+                        print(f"🔥 LA SUBE A 15X: {o['s']} confirmada por Libro")
 
-                # --- 2. LÓGICA DE "LA SUBE" O "LA BAJA" ---
-                # Si el ROI neto es > 0.5%, la sube a 15x
-                if o['x'] == 5 and roi > 0.5:
-                    o['x'] = 15
-                    print(f"🔥 LÓGICA: Tendencia confirmada. Subiendo a 15x en {o['s']}")
-
-                # --- 3. GUARDAR RESULTADOS EN LA MEMORIA EXTERNA ---
-                if roi <= -1.2 or (o['x'] == 15 and roi < 0.2) or roi >= 15.0:
+                # LÓGICA DE CIERRE (Tu stop y profit + Seguridad)
+                if (o['be'] and roi <= 0.08) or roi >= 12.0 or roi <= -1.2:
                     cap *= (1 + (roi/100))
-                    
-                    # AQUÍ SE GUARDA LA INFO PARA EL PRÓXIMO CÓDIGO
-                    db.set("saldo_eterno", cap) 
-                    if roi < 0:
-                        db.set(f"bloqueo_{o['s']}", "true", 600) # Bloquea 10 min si perdió
-                    
+                    save_cap(cap) # GUARDA LA INFO EN REDIS AL INSTANTE
                     ops.remove(o)
-                    print(f"💾 INFO GUARDADA EN REDIS | NUEVO SALDO: ${cap:.2f}")
+                    print(f"✅ VENTA FINALIZADA | SALDO EN MEMORIA: ${cap:.2f}")
 
-            # --- 4. LÓGICA DE ENTRADA (LIBRO DE VELAS) ---
-            if len(ops) < 1:
-                for coin in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    # Revisa si la moneda está bloqueada en la memoria externa
-                    if db.get(f"bloqueo_{coin}"): continue
+            # --- LÓGICA DE ENTRADA (CRUCE DE TU ESTRATEGIA + LIBRO) ---
+            if len(ops) < 2:
+                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'BTCUSDT']:
+                    if any(x['s'] == m for x in ops): continue
                     
-                    k = c.get_klines(symbol=coin, interval='1m', limit=5)
-                    v = k[-2] # Última vela cerrada
-                    op, hi, lo, cp = float(v[1]), float(v[2]), float(v[3]), float(v[4])
+                    # 1. Tu lógica de EMAs
+                    k = c.get_klines(symbol=m, interval='1m', limit=30)
+                    cl = [float(x[4]) for x in k]
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
-                    # Lógica del Libro: Cuerpo vs Mecha
-                    cuerpo = abs(cp - op)
-                    rango = hi - lo
+                    # 2. Lógica del Libro (Vela Japonesa de Poder)
+                    v_u = k[-2] # Última cerrada
+                    op_u, hi_u, lo_u, cl_u = float(v_u[1]), float(v_u[2]), float(v_u[3]), float(v_u[4])
+                    cuerpo = abs(cl_u - op_u)
+                    rango = hi_u - lo_u
                     
-                    # Solo entra si el cuerpo es dominante (Lógica de Fuerza)
-                    if cuerpo > (rango * 0.7) and (cuerpo/op) > 0.0008:
-                        # Confirmamos con EMAs
-                        kl_e = c.get_klines(symbol=coin, interval='1m', limit=30)
-                        cl_e = [float(x[4]) for x in kl_e]
-                        e9, e27 = sum(cl_e[-9:])/9, sum(cl_e[-27:])/27
+                    # El libro dice: Solo entrar si el cuerpo es > 70% de la vela (sin mechas largas)
+                    es_fuerte = cuerpo > (rango * 0.7) and (cuerpo/op_u) > 0.0006
 
-                        if e9 > e27 and cp > op:
-                            ops.append({'s':coin, 'l':'LONG', 'p':tks[coin], 'x':5})
-                            print(f"🎯 ENTRADA 5x: {coin} (Patrón de Fuerza)")
+                    if es_fuerte:
+                        if e9 > e27 and cl_u > op_u: # LONG
+                            ops.append({'s':m,'l':'LONG','p':float(c.get_symbol_ticker(symbol=m)['price']),'x':5,'be':False})
+                            print(f"🎯 DISPARO LONG (Libro + EMAs): {m}")
                             break
-                        elif e9 < e27 and cp < op:
-                            ops.append({'s':coin, 'l':'SHORT', 'p':tks[coin], 'x':5})
-                            print(f"🎯 ENTRADA 5x: {coin} (Patrón de Fuerza)")
+                        if e9 < e27 and cl_u < op_u: # SHORT
+                            ops.append({'s':m,'l':'SHORT','p':float(c.get_symbol_ticker(symbol=m)['price']),'x':5,'be':False})
+                            print(f"🎯 DISPARO SHORT (Libro + EMAs): {m}")
                             break
 
-            print(f"📡 Memoria Activa (Redis): ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
-            
-        except Exception as e:
-            time.sleep(2)
-
-        time.sleep(max(1, 4 - (time.time() - t_ciclo)))
+            print(f"💰 ${cap:.2f} | Memoria: Guardando... | {time.strftime('%H:%M:%S')}", end='\r')
+        except: 
+            time.sleep(5)
+        
+        time.sleep(max(1, 8 - (time.time() - t_l)))
 
 if __name__ == "__main__": bot()
