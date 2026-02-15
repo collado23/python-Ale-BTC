@@ -4,7 +4,7 @@ from binance.client import Client
 # --- 🧠 CEREBRO CON AUTOCRÍTICA ---
 mem = {}
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 except: r = None
 
 def mente(k, v=None, ex=None):
