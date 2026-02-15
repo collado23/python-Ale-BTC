@@ -4,7 +4,7 @@ from binance.client import Client
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
