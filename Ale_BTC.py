@@ -13,9 +13,9 @@ def g_m(leer=False, d=None):
     if not r: return None
     try:
         if leer:
-            v = r.get("mem_v158_real")
+            v = r.get("mem_v162_fiel")
             return eval(v) if v else None
-        else: r.set("mem_v158_real", str(d))
+        else: r.set("mem_v162_fiel", str(d))
     except: return None
 
 def bot():
@@ -26,10 +26,10 @@ def bot():
     
     datos = g_m(leer=True) or {"ops": []}
     ops = datos["ops"]
-    # Solo las que permiten buen apalancamiento con poco capital
-    monedas_ok = ['BTCUSDT', 'SOLUSDT', 'DOGEUSDT']
+    # Las 6 que me pediste
+    monedas = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT']
 
-    print(f"🚀 V158 - MODO POSICIÓN MÍNIMA (>100 USDT)")
+    print(f"🚀 V162 - 5X A 15X - 6 MONEDAS - TU ESTRATEGIA")
 
     while True:
         try:
@@ -42,33 +42,41 @@ def bot():
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 roi = diff * 100 * o['x']
                 
-                # Gestión de salida (ajustada para 15x)
-                if roi >= 3.0 or roi <= -1.5:
+                # --- TU SALTO A 15X ---
+                if roi > 0.3 and o['x'] == 5:
+                    try:
+                        c.futures_change_leverage(symbol=o['s'], leverage=15)
+                        o['x'] = 15
+                        print(f"🔥 SUBIENDO A 15X EN {o['s']}")
+                    except: pass
+
+                # CIERRES
+                if roi >= 2.5 or roi <= -1.2:
                     c.futures_create_order(symbol=o['s'], side=("SELL" if o['l']=="LONG" else "BUY"), type='MARKET', quantity=o['q'])
                     ops.remove(o)
                     print(f"✅ CIERRE EJECUTADO")
-                    time.sleep(5); break
+                    time.sleep(10); break
 
-            # ENTRADA: Usamos 15x de entrada para saltar el error 4164
-            if len(ops) < 1 and cap >= 10:
-                for m in monedas_ok:
+            # ENTRADAS (Una sola para que tenga fuerza y pase el mínimo de Binance)
+            if len(ops) < 1 and cap >= 12:
+                for m in monedas:
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
                     if cl[-2] > e9 and e9 > e27:
                         precio = float(c.get_symbol_ticker(symbol=m)['price'])
-                        # 70% de cap a 15x = ~$160 de posición (Pasa el mínimo de 100 de Binance)
-                        qty = round((cap * 0.70 * 15) / precio, 3 if 'BTC' in m else 1)
+                        # Usamos el 85% para intentar llegar al mínimo de Binance
+                        qty = round((cap * 0.85 * 5) / precio, 3 if 'BTC' in m or 'ETH' in m else 1)
                         
                         if qty > 0:
-                            c.futures_change_leverage(symbol=m, leverage=15)
+                            c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side='BUY', type='MARKET', quantity=qty)
-                            ops.append({'s':m,'l':'LONG','p':precio,'q':qty, 'x':15})
-                            print(f"🎯 ENTRADA 15X EXITOSA (Superó mínimo 100 USDT)")
+                            ops.append({'s':m,'l':'LONG','p':precio,'q':qty, 'x':5})
+                            print(f"🎯 ENTRADA 5X EN {m}")
                             break
 
-            print(f"💰 REAL: ${cap:.2f} | Activas: {len(ops)} | 15x", end='\r')
+            print(f"💰 REAL: ${cap:.2f} | Activas: {len(ops)}", end='\r')
 
         except Exception as e:
             print(f"⚠️ Log: {e}")
