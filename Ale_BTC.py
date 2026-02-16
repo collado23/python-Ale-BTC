@@ -2,72 +2,75 @@ import os, time, redis
 from binance.client import Client
 
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None  
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 except:
     r = None
 
 def bot():
     c = Client()
+    # Usamos el saldo real que quedó para recuperarlo con trades de calidad
     cap = float(r.get("saldo_eterno_ale") or 0.57) if r else 0.57
-    print(f"📉 V1600 ÚLTIMO ALIENTO | SALDO: ${cap:.2f}")
+    print(f"📖 V1800 ACCIÓN DEL PRECIO (LIBRO) | SALDO: ${cap:.2f}")
 
     ops = []
     while True:
         t_l = time.time()
         try:
+            # 1. GESTIÓN DE POSICIÓN (Si el retroceso deja de ser chico, abortamos)
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 roi = (((p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']) * 100 * o['x']) - (0.15 * o['x'])
                 
-                # Si el "retroceso chico" se convierte en caída grande, cerramos sin dudar
-                if roi >= 8.0 or roi <= -1.5:
+                # Salida por profit o por rotura de la estructura del escalón
+                if roi >= 6.0 or roi <= -1.2:
                     cap *= (1 + (roi/100))
                     if r: r.set("saldo_eterno_ale", str(cap))
                     ops.remove(o)
-                    print(f"✅ CIERRE: {o['s']} | Saldo: ${cap:.2f}")
+                    print(f"✅ CIERRE: {o['s']} | Resultado: {'WIN' if roi>0 else 'LOSS'}")
 
+            # 2. ANÁLISIS DE ESTRUCTURA (Impulso + Retroceso Saludable)
             if len(ops) < 1:
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT']:
-                    # Miramos los últimos 30 minutos para ver la "Distancia"
-                    k = c.get_klines(symbol=m, interval='1m', limit=30)
+                    # Miramos las últimas 15 velas para ver el dibujo completo
+                    k = c.get_klines(symbol=m, interval='1m', limit=15)
                     precios = [float(x[4]) for x in k]
+                    
+                    p_min = min(precios)
+                    p_max = max(precios)
                     p_actual = precios[-1]
                     
-                    # 1. BUSCAMOS EL IMPULSO LARGO (Distancia)
-                    # El precio tiene que haberse movido más de un 0.7% desde el inicio de la secuencia
-                    impulso = (max(precios) - min(precios)) / min(precios) * 100
+                    # MEDIMOS EL IMPULSO (Distancia que recorrió la liga)
+                    impulso = (p_max - p_min) / p_min * 100
                     
-                    if impulso < 0.7: continue # Si es cortito, no sirve.
+                    # FILTRO: El impulso tiene que ser significativo (más de 0.25%) 
+                    # para que no sea un "pico cortito"
+                    if impulso < 0.25: continue
 
-                    # 2. BUSCAMOS EL RETROCESO CHICO (El descanso)
-                    # Si venía subiendo, buscamos que baje un poquito pero que se mantenga arriba
-                    if p_actual == max(precios): continue # Si sigue en el pico, esperamos el descanso
+                    # ANALIZAMOS EL RETROCESO CHICO (El descanso)
+                    # Para LONG: El precio tocó un máximo y ahora bajó un poquito, 
+                    # pero sigue estando en la parte alta del impulso (zona de bandera).
+                    caida_desde_techo = (p_max - p_actual) / p_max * 100
+                    subida_desde_suelo = (p_actual - p_min) / p_min * 100
                     
-                    # Definimos el "Piso" del impulso
-                    piso = min(precios)
-                    techo = max(precios)
-                    
-                    # RAZONAMIENTO: El precio bajó del techo (retroceso) 
-                    # pero todavía está muy lejos del piso (sigue la fuerza)
-                    distancia_al_piso = (p_actual - piso) / piso * 100
-                    caida_desde_techo = (techo - p_actual) / techo * 100
-
-                    # TU LÓGICA: Sube (distancia > 0.7), retroceso chico (caida < 0.2), vuelve a subir
-                    if impulso > 0.7 and 0.05 < caida_desde_techo < 0.25:
-                        if p_actual > precios[-2]: # Vuelve a subir (gatillo)
+                    # --- LÓGICA DE "EL LIBRO" ---
+                    # Si subió fuerte y el retroceso es menor al 30% de lo que subió...
+                    if subida_desde_suelo > (impulso * 0.7) and 0.03 < caida_desde_techo < 0.15:
+                        # Si la vela actual empieza a superar a la anterior, ENTRA.
+                        if p_actual > precios[-2]:
                             ops.append({'s':m, 'l':'LONG', 'p':p_actual, 'x':15})
-                            print(f"🚀 TENDENCIA CONFIRMADA: Subida larga + descanso en {m}")
+                            print(f"🚀 CONTINUACIÓN LONG: Impulso {impulso:.2f}% | Retroceso CHICO detectado.")
                             break
 
-                    # LÓGICA SHORT: Cae fuerte, rebote chico, vuelve a caer
-                    if impulso > 0.7 and 0.05 < (p_actual - min(precios))/min(precios) < 0.25:
-                        if p_actual < precios[-2]: # Vuelve a caer
+                    # Para SHORT: Cayó fuerte y el rebote es apenas un suspiro
+                    rebote_desde_suelo = (p_actual - p_min) / p_min * 100
+                    if (p_max - p_actual)/p_actual > (impulso * 0.7) and 0.03 < rebote_desde_suelo < 0.15:
+                        if p_actual < precios[-2]:
                             ops.append({'s':m, 'l':'SHORT', 'p':p_actual, 'x':15})
-                            print(f"🔻 TENDENCIA CONFIRMADA: Caída larga + descanso en {m}")
+                            print(f"🔻 CONTINUACIÓN SHORT: Caída {impulso:.2f}% | Rebote CHICO detectado.")
                             break
 
-            print(f"💰 ${cap:.2f} | Esperando impulso real... | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"💰 ${cap:.2f} | Buscando escalón del libro... | {time.strftime('%H:%M:%S')}", end='\r')
         except: time.sleep(1)
-        time.sleep(max(1, 5 - (time.time() - t_l)))
+        time.sleep(max(1, 3 - (time.time() - t_l)))
 
 if __name__ == "__main__": bot()
