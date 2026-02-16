@@ -4,7 +4,7 @@ from binance.client import Client
 def bot():
     c = Client() 
     # Solo Altcoins volátiles para scalping rápido
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT'] 
     
     saldo_simulado = 31.27
     ops_sim = []
