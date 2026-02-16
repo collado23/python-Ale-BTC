@@ -3,7 +3,7 @@ from binance.client import Client
 
 # Conexión a la memoria del bot para no perder el saldo
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 except:
     r = None
 
