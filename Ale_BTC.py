@@ -1,96 +1,91 @@
-import os, time
+import os, time, threading
 from binance.client import Client
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# --- SERVER DE SALUD (Para que el bot no se muera) ---
+class H(BaseHTTPRequestHandler):
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+def s_h():
+    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
+    except: pass
 
 def bot():
-    c = Client() # Modo Simulación
-    monedas = ['SHIBUSDT', 'PEPEUSDT'] 
+    threading.Thread(target=s_h, daemon=True).start()
+    ak = os.getenv("BINANCE_API_KEY") or os.getenv("BINANCE_APY_KEY")
+    as_ = os.getenv("BINANCE_API_SECRET") or os.getenv("BINANCE_APY_SECRET")
+    c = Client(ak, as_)
     
-    saldo_simulado = 27.58 
-    ops_sim = [] # Máximo 1 operación a la vez
-    leverage = 15 
-    
-    # Comisiones (0.08% total ida y vuelta). A 15X representa 1.2% del ROI.
-    comision_total_roi = 1.2 
+    # CONFIGURACIÓN DE PLATA REAL
+    monedas = ['SHIBUSDT', 'PEPEUSDT']
+    ops = [] # Control de operación activa
+    leverage = 15
+    comision_roi = 1.2 # Lo que se lleva Binance a 15x
 
-    print(f"🔥 PROYECTO MEMES ACTIVADO (SHIB + PEPE)")
-    print(f"🎯 ESTRATEGIA: 4 Sat + 2 Giro + 1 Distancia")
-    print(f"💰 OBJETIVO: 1.5% NETO por operación")
+    print(f"🐊 ESTRATEGIA FRANCOTIRADOR 4-2-1 ACTIVADA")
 
     while True:
         try:
-            # 1. GESTIÓN DE OPERACIÓN ABIERTA
-            if len(ops_sim) > 0:
-                o = ops_sim[0]
-                ticker = c.get_symbol_ticker(symbol=o['s'])
-                p_a = float(ticker['price'])
-                
-                # Cálculo de ROI Neto (Descontando comisiones)
+            # 1. ACTUALIZAR SALDO
+            bal = c.futures_account_balance()
+            cap = next((float(b['balance']) for b in bal if b['asset'] == 'USDT'), 0.0)
+
+            # 2. GESTIÓN DE VENTA (SALIR CON PLATA)
+            for o in ops[:]:
+                p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi_bruto = diff * 100 * leverage
-                roi_neto = roi_bruto - comision_total_roi
+                roi_neto = (diff * 100 * leverage) - comision_roi
                 
-                # Análisis de velas para salida
+                # Análisis de velas para salida (Distancia)
                 k = c.get_klines(symbol=o['s'], interval='1m', limit=5)
-                v_u = k[-2] # Última cerrada
-                color_u = "VERDE" if float(v_u[4]) > float(v_u[1]) else "ROJA"
+                color_u = "VERDE" if float(k[-2][4]) > float(k[-2][1]) else "ROJA"
 
                 cierre = False
-                # SALIDA SI YA TENEMOS EL 1.5% NETO Y HAY GIRO
-                if roi_neto >= 1.5:
-                    if (o['l'] == "LONG" and color_u == "ROJA") or \
-                       (o['l'] == "SHORT" and color_u == "VERDE"):
-                        cierre, motivo = True, "🎯 PROFIT 1.5% NETO"
-                
-                # STOP LOSS (Protección ante desplomes)
+                if roi_neto >= 1.5: # Queremos 1.5% limpio
+                    if (o['l'] == "LONG" and color_u == "ROJA") or (o['l'] == "SHORT" and color_u == "VERDE"):
+                        cierre, motivo = True, "✅ PROFIT LOGRADO"
                 elif roi_neto <= -2.5:
-                    cierre, motivo = True, "⚠️ SL PROTECT"
+                    cierre, motivo = True, "❌ STOP LOSS"
 
                 if cierre:
-                    saldo_simulado += (o['monto'] * roi_neto / 100)
-                    print(f"\n{motivo} | ROI: {roi_neto:.2f}% | Nuevo Saldo: ${saldo_simulado:.2f}")
-                    ops_sim.pop()
+                    c.futures_create_order(symbol=o['s'], side=("SELL" if o['l']=="LONG" else "BUY"), type='MARKET', quantity=o['q'])
+                    ops.remove(o)
+                    print(f"{motivo} | ROI NETO: {roi_neto:.2f}%")
+                    time.sleep(5)
 
-            # 2. BÚSQUEDA DE ENTRADA (Lógica 4-2-1)
-            else:
+            # 3. GESTIÓN DE COMPRA (ENTRAR CON ESTRATEGIA)
+            if len(ops) < 1 and cap >= 10:
                 for m in monedas:
-                    k_1m = c.get_klines(symbol=m, interval='1m', limit=15)
+                    k = c.get_klines(symbol=m, interval='1m', limit=15)
                     
-                    # A. SATURACIÓN (4 velas del mismo color)
-                    v_sat = k_1m[-8:-4] 
-                    s_r = all(float(v[4]) < float(v[1]) for v in v_sat)
-                    s_v = all(float(v[4]) > float(v[1]) for v in v_sat)
+                    # LÓGICA 4 (Saturación) - 2 (Giro) - 1 (Distancia)
+                    v_sat = k[-8:-4]
+                    s_r = all(float(v[4]) < float(v[1]) for v in v_sat) # 4 Rojas
+                    s_v = all(float(v[4]) > float(v[1]) for v in v_sat) # 4 Verdes
                     
-                    # B. GIRO (2 velas contrarias)
-                    v_giro = k_1m[-4:-2]
-                    g_v = all(float(v[4]) > float(v[1]) for v in v_giro)
-                    g_r = all(float(v[4]) < float(v[1]) for v in v_giro)
-
-                    # C. DISTANCIA (1 vela de confirmación)
-                    v_dist = k_1m[-2]
+                    v_giro = k[-4:-2]
+                    g_v = all(float(v[4]) > float(v[1]) for v in v_giro) # 2 Verdes
+                    g_r = all(float(v[4]) < float(v[1]) for v in v_giro) # 2 Rojas
+                    
+                    v_dist = k[-2]
                     c_dist = "VERDE" if float(v_dist[4]) > float(v_dist[1]) else "ROJA"
 
                     p_act = float(c.get_symbol_ticker(symbol=m)['price'])
-                    gatillo = ""
+                    lado = ""
+                    if s_r and g_v and c_dist == "VERDE": lado = "LONG"
+                    if s_v and g_r and c_dist == "ROJA": lado = "SHORT"
 
-                    # Si hubo 4 rojas -> 2 verdes -> 1 verde de distancia = COMPRA
-                    if s_r and g_v and c_dist == "VERDE": gatillo = "LONG"
-                    
-                    # Si hubo 4 verdes -> 2 rojas -> 1 roja de distancia = VENTA
-                    if s_v and g_r and c_dist == "ROJA": gatillo = "SHORT"
-
-                    if gatillo:
-                        ops_sim.append({'s':m, 'l':gatillo, 'p':p_act, 'monto': saldo_simulado})
-                        print(f"\n🚀 ENTRADA EN {m} ({gatillo}) | Patrón 4-2-1 Confirmado")
+                    if lado:
+                        qty = round((cap * 0.95 * leverage) / p_act, 0)
+                        c.futures_change_leverage(symbol=m, leverage=leverage)
+                        c.futures_create_order(symbol=m, side=('BUY' if lado=="LONG" else 'SELL'), type='MARKET', quantity=qty)
+                        ops.append({'s':m, 'l':lado, 'p':p_act, 'q':qty})
+                        print(f"🚀 DISPARO EN {m} ({lado})")
                         break
 
-            # Status en una sola línea para no llenar la consola
-            if len(ops_sim) == 0:
-                print(f"📊 SALDO: ${saldo_simulado:.2f} | Buscando racha de 4 en SHIB/PEPE...      ", end='\r')
-            else:
-                print(f"⏳ EN POSICIÓN: {ops_sim[0]['s']} | ROI NETO: {roi_neto:.2f}%      ", end='\r')
+            print(f"💰 SALDO: ${cap:.2f} | Acechando SHIB/PEPE...      ", end='\r')
 
         except Exception as e:
-            time.sleep(2)
+            time.sleep(5)
         time.sleep(1)
 
 if __name__ == "__main__": bot()
