@@ -4,7 +4,7 @@ from binance.client import Client
 def bot():
     c = Client() 
     # Monedas con mucho movimiento para Scalping rápido
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT', 'BTCUSDT', 'ETHUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT', 'BTCUSDT', 'ETHUSDT'] 
     
     saldo_simulado = 31.27
     ops_sim = []
