@@ -2,7 +2,7 @@ import os, time, redis
 from binance.client import Client
 
 try:
-    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+    r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None 
 except:
     r = None
 
