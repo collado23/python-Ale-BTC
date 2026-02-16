@@ -4,7 +4,7 @@ from binance.client import Client
 def bot():
     c = Client() 
     # Las mejores para Zig-Zag rápido
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT'] 
     
     saldo_simulado = 31.27
     ops_sim = []
