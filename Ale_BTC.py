@@ -2,7 +2,7 @@ import os, time
 from binance.client import Client
 
 def bot():
-    c = Client() # Modo simulación
+    c = Client() # Modo simulación 
     simbolo = 'SHIBUSDT'
     
     # --- PARÁMETROS SHIB ---
