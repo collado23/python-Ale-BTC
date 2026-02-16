@@ -2,7 +2,7 @@ import os, time
 from binance.client import Client
 
 def bot():
-    # Modo simulación (lectura de datos públicos)
+    # Modo simulación (lectura de datos públicos) 
     c = Client()
     simbolo = 'XRPUSDT'
     
