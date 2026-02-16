@@ -1,5 +1,5 @@
 import os, time
-from binance.client import Client
+from binance.client import Client 
 
 def bot():
     c = Client()
