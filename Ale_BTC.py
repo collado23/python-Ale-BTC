@@ -7,7 +7,7 @@ API_SECRET = os.getenv('BINANCE_API_SECRET')
 
 def bot():
     c = Client(API_KEY, API_SECRET)
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT'] 
     leverage = 15 
     capital_real = 15.0 
 
