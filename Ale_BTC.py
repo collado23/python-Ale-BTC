@@ -2,7 +2,7 @@ import os, time
 from binance.client import Client
 
 def bot():
-    c = Client() # Simulación
+    c = Client() # Simulación 
     monedas = ['SHIBUSDT', 'PEPEUSDT']
     
     saldo_simulado = 27.58 
