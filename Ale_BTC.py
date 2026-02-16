@@ -6,7 +6,7 @@ def bot():
     monedas = ['SHIBUSDT', 'PEPEUSDT']
     saldo_simulado = 27.58 
     ops_sim = []
-    leverage = 15 
+    leverage = 15  
     
     # Comisiones: 0.04% por operación (entrada + salida = 0.08% total)
     # A 15X, la comisión se come un 1.2% de tu ROI bruto.
