@@ -3,7 +3,7 @@ from binance.client import Client
 
 def bot():
     c = Client() # Simulación (no necesita keys reales para lectura)
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT'] 
     
     saldo_simulado = 30.36 # El saldo donde quedamos tras el SL
     ops_sim = []
