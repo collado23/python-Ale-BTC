@@ -3,7 +3,7 @@ from binance.client import Client
 
 def bot():
     c = Client() # Modo Simulación
-    monedas = ['SHIBUSDT', 'PEPEUSDT']
+    monedas = ['SHIBUSDT', 'PEPEUSDT'] 
     
     saldo_simulado = 27.58 
     ops_sim = [] # Máximo 1 operación a la vez
