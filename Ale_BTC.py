@@ -5,7 +5,7 @@ def bot():
     # Usamos la API solo para LEER precios, no para operar real
     c = Client() 
     
-    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT']
+    monedas = ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'LINKUSDT', 'ADAUSDT'] 
     
     # --- VARIABLES DE SIMULACIÓN ---
     saldo_simulado = 30.0
