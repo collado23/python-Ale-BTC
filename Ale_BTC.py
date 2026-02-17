@@ -1,53 +1,94 @@
-import os, time
-from binance.client import Client 
+import os, time, redis, threading
+from binance.client import Client
 
-def bot_simulacion():
-    c = Client() 
-    cap = 15.77  
+# --- 🗝️ CONFIGURACIÓN DE ENTORNO ---
+API_KEY = os.getenv("BINANCE_API_KEY")
+API_SECRET = os.getenv("BINANCE_API_SECRET")
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+
+def g_m(leer=False, d=None):
+    c_i = 15.77  # Saldo inicial si no hay Redis
+    if not r: return c_i
+    try:
+        if leer:
+            h = r.get("cap_real_v143")
+            return float(h) if h else c_i
+        else: r.set("cap_real_v143", str(d))
+    except: return c_i
+
+# --- 🚀 MOTOR DEL BOT ---
+def bot_real():
+    c = Client(API_KEY, API_SECRET)
+    cap = g_m(leer=True)
     ops = []
     monedas = ['SOLUSDT', 'BNBUSDT', 'XRPUSDT']
     idx = 0
     
-    print(f"🧪 SIMULACIÓN CON SALTO 15X | SALDO: ${cap:.2f}")
+    print(f"💰 BOT ESCALADOR ACTIVADO | SALDO: ${cap:.2f}")
 
     while True:
         try:
             m = monedas[idx]
             p_act = float(c.get_symbol_ticker(symbol=m)['price'])
             
+            # --- 📈 GESTIÓN DE POSICIÓN ABIERTA ---
             for o in ops[:]:
-                # Cálculo de ROI dinámico según el apalancamiento actual (o['x'])
                 diff = (p_act - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_act)/o['p']
-                roi_n = (diff * 100 * o['x']) - 0.9
+                roi_n = (diff * 100 * o['x']) - 0.9 # ROI Neto con comisión
                 
-                # EL SALTO: Si llega a 2%, sube a 15x y activa BE
+                # 1. SALTO A 15X (Se activa al 2% neto)
                 if roi_n >= 2.0 and o['x'] == 5: 
                     o['x'] = 15
-                    o['be'] = True
-                    print(f"\n🔥 [SIM] SALTO A 15X EN {o['s']} | PROTECCIÓN 0.5% ON")
-                
-                # CIERRES
-                if (o['be'] and roi_n <= 0.5) or roi_n >= 3.5 or roi_n <= -2.5:
-                    cap *= (1 + (roi_n/100))
-                    ops.remove(o)
-                    print(f"\n✅ [SIM] CIERRE {m} | ROI FINAL: {roi_n:.2f}% | SALDO: ${cap:.2f}")
-                    idx = (idx + 1) % len(monedas)
+                    o['be'] = 0.5  # Primer piso de protección
+                    print(f"\n🔥 SALTO A 15X EN {o['s']} | PISO INICIAL: 0.5%")
 
+                # 2. EL ESCALADOR (Trailing manual por niveles)
+                if o['x'] == 15:
+                    # Nivel 2: Si llega a 3%, sube piso a 1.5%
+                    if roi_n >= 3.0 and o['be'] < 1.5:
+                        o['be'] = 1.5
+                        print(f"\n🔼 ESCALÓN 2: ROI {roi_n:.1f}% | PISO: 1.5%")
+                    
+                    # Nivel 3: Si llega a 4%, sube piso a 2.5%
+                    if roi_n >= 4.0 and o['be'] < 2.5:
+                        o['be'] = 2.5
+                        print(f"\n🔼 ESCALÓN 3: ROI {roi_n:.1f}% | PISO: 2.5%")
+                    
+                    # Nivel 4: Si llega a 5%, sube piso a 3.5%
+                    if roi_n >= 5.0 and o['be'] < 3.5:
+                        o['be'] = 3.5
+                        print(f"\n🔼 ESCALÓN 4: ROI {roi_n:.1f}% | PISO: 3.5%")
+
+                # 3. CONDICIONES DE CIERRE (Piso / Profit 15% / Stop -2.5%)
+                if (o['be'] > 0 and roi_n <= o['be']) or roi_n >= 15.0 or roi_n <= -2.5:
+                    n_c = cap * (1 + (roi_n/100))
+                    g_m(d=n_c); ops.remove(o); cap = n_c
+                    print(f"\n✅ CIERRE EN {o['s']} | ROI FINAL: {roi_n:.2f}% | SALDO: ${cap:.2f}")
+                    idx = (idx + 1) % len(monedas) # Rota a la siguiente moneda
+
+            # --- 🎯 GATILLO DE ENTRADA (La Cruz de Ale) ---
             if len(ops) < 1:
+                # Calculamos EMA 32
                 k = c.get_klines(symbol=m, interval='1m', limit=33)
                 cl = [float(x[4]) for x in k]
                 e32 = sum(cl[-32:])/32
                 
-                # Entrada al toque de la línea
-                if p_act >= e32:
-                    ops.append({'s': m, 'l': 'LONG', 'p': p_act, 'x': 5, 'be': False})
-                    print(f"\n🚀 [SIM] ENTRADA LONG: {m} | Precio: {p_act}")
+                # DISPARO AL TOQUE DE LÍNEA
+                if p_act >= e32: 
+                    ops.append({'s': m, 'l': 'LONG', 'p': p_act, 'x': 5, 'be': 0})
+                    print(f"\n❌ COMPRA REAL LONG: {m} tocando línea {e32:.2f}")
                 elif p_act <= e32:
-                    ops.append({'s': m, 'l': 'SHORT', 'p': p_act, 'x': 5, 'be': False})
-                    print(f"\n🚀 [SIM] ENTRADA SHORT: {m} | Precio: {p_act}")
+                    ops.append({'s': m, 'l': 'SHORT', 'p': p_act, 'x': 5, 'be': 0})
+                    print(f"\n❌ VENTA REAL SHORT: {m} tocando línea {e32:.2f}")
 
-            print(f"⏳ {m} a ${p_act} | ROI: {roi_n if ops else 0:.2f}% | X: {ops[0]['x'] if ops else 5}   ", end='\r')
-            time.sleep(2)
-        except: time.sleep(5)
+            # Estado en consola
+            status = f"ROI: {roi_n:.2f}% (Piso: {o['be']}%)" if len(ops) > 0 else f"Acechando {m}..."
+            print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
+            
+            time.sleep(2) # Seguro Anti-Ban
 
-if __name__ == "__main__": bot_simulacion()
+        except Exception as e:
+            if "429" in str(e): time.sleep(30)
+            else: time.sleep(5)
+
+if __name__ == "__main__": bot_real()
