@@ -12,7 +12,7 @@ def s_h():
 # --- 🧠 2. MEMORIA REDIS ---
 r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 def g_m(leer=False, d=None):
-    c_i = 15.77 # Tu capital de simulación
+    c_i = 15.77 
     if not r: return c_i
     try:
         if leer:
@@ -21,11 +21,11 @@ def g_m(leer=False, d=None):
         else: r.set("cap_v143", str(d))
     except: return c_i
 
-# --- 🚀 3. MOTOR V143 (5x -> 15x) ---
+# --- 🚀 3. MOTOR V143 FRANCOTIRADOR (Ajustado) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client(); cap = g_m(leer=True); ops = []
-    print(f"🦁 V143 AGRESIVA CON COMISIONES | ${cap}")
+    print(f"🎯 V143 FRANCOTIRADOR | ${cap} | COMISIÓN 0.9")
 
     while True:
         t_l = time.time()
@@ -34,46 +34,49 @@ def bot():
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
-                # --- CÁLCULO DE COMISIONES ---
+                # --- NUEVA COMISIÓN A 0.9 ---
                 roi_bruto = diff * 100 * o['x']
-                comision_roi = 0.08 * o['x'] # 0.08% ida y vuelta * leverage
-                roi_n = roi_bruto - comision_roi # ROI NETO (Real)
+                comision_roi = 0.9  # Ajustado según tu pedido
+                roi_n = roi_bruto - comision_roi 
                 
-                # Escalada Ultra Rápida (Solo si el NETO es positivo)
-                if roi_n > 0.1 and o['x'] == 5: 
+                # 1. SALTO A 15X (Pide 2.0% NETO)
+                if roi_n >= 2.0 and o['x'] == 5: 
                     o['x'] = 15; o['be'] = True
-                    print(f"🔥 SALTO A 15X (NETO POSITIVO): {o['s']}")
+                    print(f"🔥 SALTO A 15X: {o['s']} (Ganancia consolidada)")
 
-                # CIERRES (Basados en ROI NETO)
-                # Profit: 1.5% limpio | Stop: -1.1% neto (incluyendo comisión)
-                if (o['be'] and roi_n <= 0.05) or roi_n >= 1.5 or roi_n <= -1.1:
+                # 2. CIERRES (Profit 3.5% o Stop Loss 2.5%)
+                if (o['be'] and roi_n <= 0.1) or roi_n >= 3.5 or roi_n <= -2.5:
                     n_c = cap * (1 + (roi_n/100))
                     g_m(d=n_c); ops.remove(o); cap = n_c
-                    print(f"✅ FIN {o['s']} | NETO: {roi_n:.2f}% | SALDO: ${cap:.2f}")
+                    print(f"\n✅ CIERRE EN {o['s']} | NETO: {roi_n:.2f}% | SALDO: ${cap:.2f}")
 
-            if len(ops) < 2:
-                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'ETHUSDT', 'BTCUSDT']:
-                    if any(x['s'] == m for x in ops): continue
-                    k = c.get_klines(symbol=m, interval='1m', limit=30)
-                    cl = [float(x[4]) for x in k]
-                    op = [float(x[1]) for x in k]
+            # 3. ENTRADA (Solo 1 bala, filtro 0.6%)
+            if len(ops) < 1:
+                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'SHIBUSDT', 'BTCUSDT']:
+                    k = c.get_klines(symbol=m, interval='1m', limit=10)
+                    cl, op = float(k[-2][4]), float(k[-2][1]) # Vela cerrada anterior
                     
-                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
-                    v, v_a, o_v, o_a = cl[-2], cl[-3], op[-2], op[-3]
+                    # Filtro de fuerza de 0.6%
+                    mov = abs((cl - op) / op) * 100
+                    
+                    if mov >= 0.6:
+                        # Lógica de medias móviles para dirección
+                        k_full = [float(x[4]) for x in k]
+                        e9, e27 = sum(k_full[-9:])/9, sum(k_full[-27:])/27
+                        
+                        p_act = float(c.get_symbol_ticker(symbol=m)['price'])
+                        
+                        if cl > op and cl > e9 and e9 > e27: # Tendencia alcista fuerte
+                            ops.append({'s':m,'l':'LONG','p':p_act,'x':5,'be':False})
+                            print(f"\n🎯 DISPARO LONG: {m} (Fuerza: {mov:.2f}%)")
+                            break
+                        if cl < op and cl < e9 and e9 < e27: # Tendencia bajista fuerte
+                            ops.append({'s':m,'l':'SHORT','p':p_act,'x':5,'be':False})
+                            print(f"\n🎯 DISPARO SHORT: {m} (Fuerza: {mov:.2f}%)")
+                            break
 
-                    # Gatillo: Acción de precio pura
-                    if v > o_v and v > o_a and v > e9 and e9 > e27:
-                        ops.append({'s':m,'l':'LONG','p':cl[-1],'x':5,'be':False})
-                        print(f"🎯 DISPARO 5x LONG: {m}")
-                        break
-                    if v < o_v and v < o_a and v < e9 and e9 < e27:
-                        ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':5,'be':False})
-                        print(f"🎯 DISPARO 5x SHORT: {m}")
-                        break
-
-            # Mostrar ROI NETO en tiempo real en la consola
-            status_roi = f" | ROI: {roi_n:.2f}%" if len(ops) > 0 else ""
-            print(f"💰 ${cap:.2f} | Activas: {len(ops)}{status_roi} | {time.strftime('%H:%M:%S')}   ", end='\r')
+            status = f"ROI: {roi_n:.2f}%" if len(ops) > 0 else "Acechando 0.6%..."
+            print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
             
         except: time.sleep(5)
         time.sleep(max(1, 10 - (time.time() - t_l)))
