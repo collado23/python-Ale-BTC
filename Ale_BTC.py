@@ -1,77 +1,74 @@
-import os, time, threading
+import os, time, redis, json, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# --- SERVER DE SALUD ---
+# --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")  
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
+# --- 🧠 2. MEMORIA REDIS ---
+r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
+def g_m(leer=False, d=None):
+    c_i = 15.77
+    if not r: return c_i
+    try:
+        if leer:
+            h = r.get("cap_v143")
+            return float(h) if h else c_i
+        else: r.set("cap_v143", str(d))
+    except: return c_i
+
+# --- 🚀 3. MOTOR V143 (5x -> 15x) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    c = Client() # MODO SIMULACIÓN (No necesita llaves reales)
-    
-    # --- VARIABLES DE SIMULACIÓN ---
-    monedas = ['LINKUSDT', 'PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT']
-    saldo_sim = 22.19  # Tu saldo actual para ver si recuperamos
-    ops_sim = []
-    
-    print(f"🎮 SIMULADOR V163 + COMISIONES")
-    print(f"📈 Estrategia: E9 > E27 | Salto 5x -> 15x")
+    c = Client(); cap = g_m(leer=True); ops = []
+    print(f"🦁 V143 AGRESIVA | ${cap}")
 
     while True:
+        t_l = time.time()
         try:
-            # --- 1. SEGUIMIENTO DE OPERACIÓN SIMULADA ---
-            if len(ops_sim) > 0:
-                o = ops_sim[0]
+            for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
-                
-                # Diferencia de precio y ROI Bruto
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi_bruto = diff * 100 * o['x']
+                roi = diff * 100 * o['x']
                 
-                # Descontamos comisión (0.08% total * apalancamiento)
-                comision_roi = 0.08 * o['x']
-                roi_neto = roi_bruto - comision_roi
-                
-                # SALTO MÁGICO A 15X (Si el neto es bueno)
-                if roi_neto > 0.3 and o['x'] == 5:
-                    o['x'] = 15
-                    print(f"🔥 SIM_OPORTUNIDAD: Subiendo a 15x en {o['s']}")
+                # Escalada Ultra Rápida (5x a 15x)
+                if roi > 0.2 and o['x'] == 5: 
+                    o['x'] = 15; o['be'] = True
+                    print(f"🔥 SALTO A 15X: {o['s']}")
 
-                # CIERRES (Netos)
-                if roi_neto >= 2.5 or roi_neto <= -1.9:
-                    saldo_sim += (o['monto'] * roi_neto / 100)
-                    print(f"\n✅ SIM_CIERRE {o['s']} | NETO: {roi_neto:.2f}% | Saldo: ${saldo_sim:.2f}")
-                    ops_sim.pop()
-                    time.sleep(10)
+                # Cierre ajustado para no esperar tanto
+                if (o['be'] and roi <= 0.05) or roi >= 1.5 or roi <= -0.9:
+                    n_c = cap * (1 + (roi/100))
+                    g_m(d=n_c); ops.remove(o); cap = n_c
+                    print(f"✅ FIN {o['s']} | ROI: {roi:.2f}%")
 
-            # --- 2. ENTRADA SIMULADA ---
-            elif saldo_sim >= 10:
-                for m in monedas:
+            if len(ops) < 2:
+                # Monedas más volátiles para ver movimiento
+                for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'ETHUSDT', 'BTCUSDT']:
+                    if any(x['s'] == m for x in ops): continue
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
-                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
+                    op = [float(x[1]) for x in k]
                     
-                    # Lógica de cruce de medias
-                    if cl[-2] > e9 and e9 > e27:
-                        precio = float(c.get_symbol_ticker(symbol=m)['price'])
-                        ops_sim.append({
-                            's': m, 'l': 'LONG', 'p': precio, 
-                            'monto': saldo_sim, 'x': 5
-                        })
-                        print(f"\n🎯 SIM_ENTRADA 5X EN {m}")
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
+                    v, v_a, o_v, o_a = cl[-2], cl[-3], op[-2], op[-3]
+
+                    # Gatillo: Acción de precio pura
+                    if v > o_v and v > o_a and v > e9 and e9 > e27:
+                        ops.append({'s':m,'l':'LONG','p':cl[-1],'x':5,'be':False})
+                        print(f"🎯 DISPARO 5x: {m}")
+                        break
+                    if v < o_v and v < o_a and v < e9 and e9 < e27:
+                        ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':5,'be':False})
+                        print(f"🎯 DISPARO 5x: {m}")
                         break
 
-            # STATUS
-            if len(ops_sim) == 0:
-                print(f"📊 SALDO SIM: ${saldo_sim:.2f} | Buscando cruce E9/E27...      ", end='\r')
-            else:
-                print(f"⏳ EN POSICIÓN: {ops_sim[0]['s']} | ROI NETO: {roi_neto:.2f}%      ", end='\r')
-
+            print(f"💰 ${cap:.2f} | Activas: {len(ops)} | {time.strftime('%H:%M:%S')}", end='\r')
         except: time.sleep(5)
-        time.sleep(2)
+        time.sleep(max(1, 10 - (time.time() - t_l)))
 
 if __name__ == "__main__": bot()
