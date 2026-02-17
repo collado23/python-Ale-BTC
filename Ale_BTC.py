@@ -4,7 +4,7 @@ from binance.client import Client
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -36,22 +36,22 @@ def bot():
                 
                 # --- CÁLCULO DE COMISIONES ---
                 roi_bruto = diff * 100 * o['x']
-                comision_roi = 0.16 * o['x'] # 0.16% ida y vuelta * leverage
+                comision_roi = 0.08 * o['x'] # 0.08% ida y vuelta * leverage
                 roi_n = roi_bruto - comision_roi # ROI NETO (Real)
                 
                 # Escalada Ultra Rápida (Solo si el NETO es positivo)
-                if roi_n > 0.2 and o['x'] == 5: 
+                if roi_n > 0.1 and o['x'] == 5: 
                     o['x'] = 15; o['be'] = True
                     print(f"🔥 SALTO A 15X (NETO POSITIVO): {o['s']}")
 
                 # CIERRES (Basados en ROI NETO)
-                # Profit: 1.5% limpio | Stop: -2.5% neto (incluyendo comisión)
-                if (o['be'] and roi_n <= 0.05) or roi_n >= 2.5 or roi_n <= -2.1:
-                    n_c = cap * (2 + (roi_n/100))
+                # Profit: 1.5% limpio | Stop: -1.1% neto (incluyendo comisión)
+                if (o['be'] and roi_n <= 0.05) or roi_n >= 1.5 or roi_n <= -1.1:
+                    n_c = cap * (1 + (roi_n/100))
                     g_m(d=n_c); ops.remove(o); cap = n_c
                     print(f"✅ FIN {o['s']} | NETO: {roi_n:.2f}% | SALDO: ${cap:.2f}")
 
-            if len(ops) < 1:
+            if len(ops) < 2:
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'ETHUSDT', 'BTCUSDT']:
                     if any(x['s'] == m for x in ops): continue
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
