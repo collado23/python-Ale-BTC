@@ -15,7 +15,7 @@ def g_m(leer=False, d=None):
     c_i = 15.77 
     if not r: return c_i
     try:
-        if leer:
+        if leer: 
             h = r.get("cap_v143")
             return float(h) if h else c_i
         else: r.set("cap_v143", str(d))
