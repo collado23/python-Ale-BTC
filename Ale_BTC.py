@@ -4,7 +4,7 @@ from binance.client import Client
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -21,11 +21,11 @@ def g_m(leer=False, d=None):
         else: r.set("cap_v143", str(d))
     except: return c_i
 
-# --- 🚀 3. MOTOR V143 FRANCOTIRADOR (Ajustado) ---
+# --- 🚀 3. MOTOR V143 FRANCOTIRADOR (Sin Filtro 0.6) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client(); cap = g_m(leer=True); ops = []
-    print(f"🎯 V143 FRANCOTIRADOR | ${cap} | COMISIÓN 0.9")
+    print(f"🎯 V143 AGRESIVA | ${cap} | COMISIÓN 0.9 | SIN FILTRO 0.6")
 
     while True:
         t_l = time.time()
@@ -34,15 +34,15 @@ def bot():
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
-                # --- NUEVA COMISIÓN A 0.9 ---
+                # COMISIONES FIJAS
                 roi_bruto = diff * 100 * o['x']
-                comision_roi = 0.9  # Ajustado según tu pedido
+                comision_roi = 0.9  
                 roi_n = roi_bruto - comision_roi 
                 
                 # 1. SALTO A 15X (Pide 2.0% NETO)
                 if roi_n >= 2.0 and o['x'] == 5: 
                     o['x'] = 15; o['be'] = True
-                    print(f"🔥 SALTO A 15X: {o['s']} (Ganancia consolidada)")
+                    print(f"\n🔥 SALTO A 15X: {o['s']}")
 
                 # 2. CIERRES (Profit 3.5% o Stop Loss 2.5%)
                 if (o['be'] and roi_n <= 0.1) or roi_n >= 3.5 or roi_n <= -2.5:
@@ -50,32 +50,29 @@ def bot():
                     g_m(d=n_c); ops.remove(o); cap = n_c
                     print(f"\n✅ CIERRE EN {o['s']} | NETO: {roi_n:.2f}% | SALDO: ${cap:.2f}")
 
-            # 3. ENTRADA (Solo 1 bala, filtro 0.6%)
+            # 3. ENTRADA (1 Operación, Acción de precio directa)
             if len(ops) < 1:
                 for m in ['PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'SHIBUSDT', 'BTCUSDT']:
                     k = c.get_klines(symbol=m, interval='1m', limit=10)
-                    cl, op = float(k[-2][4]), float(k[-2][1]) # Vela cerrada anterior
+                    cl, op = float(k[-2][4]), float(k[-2][1]) 
                     
-                    # Filtro de fuerza de 0.6%
-                    mov = abs((cl - op) / op) * 100
+                    # Medias móviles para dirección
+                    k_full = [float(x[4]) for x in k]
+                    e9, e27 = sum(k_full[-9:])/9, sum(k_full[-27:])/27
                     
-                    if mov >= 0.6:
-                        # Lógica de medias móviles para dirección
-                        k_full = [float(x[4]) for x in k]
-                        e9, e27 = sum(k_full[-9:])/9, sum(k_full[-27:])/27
-                        
-                        p_act = float(c.get_symbol_ticker(symbol=m)['price'])
-                        
-                        if cl > op and cl > e9 and e9 > e27: # Tendencia alcista fuerte
-                            ops.append({'s':m,'l':'LONG','p':p_act,'x':5,'be':False})
-                            print(f"\n🎯 DISPARO LONG: {m} (Fuerza: {mov:.2f}%)")
-                            break
-                        if cl < op and cl < e9 and e9 < e27: # Tendencia bajista fuerte
-                            ops.append({'s':m,'l':'SHORT','p':p_act,'x':5,'be':False})
-                            print(f"\n🎯 DISPARO SHORT: {m} (Fuerza: {mov:.2f}%)")
-                            break
+                    p_act = float(c.get_symbol_ticker(symbol=m)['price'])
+                    
+                    # Gatillo inmediato: Vela a favor de tendencia y arriba/debajo de E9
+                    if cl > op and cl > e9 and e9 > e27: # LONG
+                        ops.append({'s':m,'l':'LONG','p':p_act,'x':5,'be':False})
+                        print(f"\n🎯 DISPARO LONG: {m}")
+                        break
+                    if cl < op and cl < e9 and e9 < e27: # SHORT
+                        ops.append({'s':m,'l':'SHORT','p':p_act,'x':5,'be':False})
+                        print(f"\n🎯 DISPARO SHORT: {m}")
+                        break
 
-            status = f"ROI: {roi_n:.2f}%" if len(ops) > 0 else "Acechando 0.6%..."
+            status = f"ROI: {roi_n:.2f}%" if len(ops) > 0 else "Acechando entrada..."
             print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
             
         except: time.sleep(5)
