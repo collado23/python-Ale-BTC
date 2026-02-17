@@ -42,7 +42,7 @@ def bot():
                     print(f"🔥 SIM_OPORTUNIDAD: Subiendo a 15x en {o['s']}")
 
                 # CIERRES (Netos)
-                if roi_neto >= 2.5 or roi_neto <= -1.5:
+                if roi_neto >= 2.5 or roi_neto <= -1.9:
                     saldo_sim += (o['monto'] * roi_neto / 100)
                     print(f"\n✅ SIM_CIERRE {o['s']} | NETO: {roi_neto:.2f}% | Saldo: ${saldo_sim:.2f}")
                     ops_sim.pop()
