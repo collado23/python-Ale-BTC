@@ -4,7 +4,7 @@ from binance.client import Client
 def bot():
     c = Client()
     monedas = ['SHIBUSDT', 'PEPEUSDT']
-    saldo_sim = 22.19  # Tu saldo actual tras el error
+    saldo_sim = 22.19  # Tu saldo actual tras el error 
     ops_sim = []
     leverage = 15
     comision_roi = 1.2 
