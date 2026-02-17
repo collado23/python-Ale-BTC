@@ -4,7 +4,7 @@ from binance.client import Client
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -12,7 +12,7 @@ def s_h():
 # --- 🧠 2. MEMORIA REDIS ---
 r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
 def g_m(leer=False, d=None):
-    c_i = 17.77 
+    c_i = 15.77 
     if not r: return c_i
     try:
         if leer: 
@@ -48,7 +48,7 @@ def bot():
                     print(f"\n🔥 SALTO A 15X EN {o['s']}")
 
                 # 2. CIERRES (Profit 3.5% o Stop Loss 2.5%)
-                if (o['be'] and roi_n <= 0.2) or roi_n >= 3.5 or roi_n <= -2.5:
+                if (o['be'] and roi_n <= 0.5) or roi_n >= 3.5 or roi_n <= -2.5:
                     n_c = cap * (1 + (roi_n/100))
                     g_m(d=n_c); ops.remove(o); cap = n_c
                     print(f"\n✅ CIERRE EN {o['s']} | NETO: {roi_n:.2f}% | SALDO: ${cap:.2f}")
