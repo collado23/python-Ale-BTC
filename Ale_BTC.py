@@ -1,94 +1,77 @@
-import os, time, redis, threading
+import os, time, threading
 from binance.client import Client
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # --- SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
-# --- MEMORIA FIEL ---
-r = redis.from_url(os.getenv("REDIS_URL")) if os.getenv("REDIS_URL") else None
-def g_m(leer=False, d=None):
-    if not r: return None
-    try:
-        if leer:
-            v = r.get("mem_v163_final_6")
-            return eval(v) if v else None
-        else: r.set("mem_v163_final_6", str(d))
-    except: return None
-
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    ak = os.getenv("BINANCE_API_KEY") or os.getenv("BINANCE_APY_KEY")
-    as_ = os.getenv("BINANCE_API_SECRET") or os.getenv("BINANCE_APY_SECRET")
-    c = Client(ak, as_)
+    c = Client() # MODO SIMULACIÓN (No necesita llaves reales)
     
-    datos = g_m(leer=True) or {"ops": []}
-    ops = datos["ops"]
+    # --- VARIABLES DE SIMULACIÓN ---
     monedas = ['LINKUSDT', 'PEPEUSDT', 'SOLUSDT', 'DOGEUSDT', 'XRPUSDT', 'ADAUSDT']
-
-    print(f"🚀 V163 + COMISIONES - 6 MONEDAS - 5X -> 15X")
+    saldo_sim = 22.19  # Tu saldo actual para ver si recuperamos
+    ops_sim = []
+    
+    print(f"🎮 SIMULADOR V163 + COMISIONES")
+    print(f"📈 Estrategia: E9 > E27 | Salto 5x -> 15x")
 
     while True:
         try:
-            bal = c.futures_account_balance()
-            cap = next((float(b['balance']) for b in bal if b['asset'] == 'USDT'), 0.0)
-            g_m(d={"ops": ops})
-
-            for o in ops[:]:
+            # --- 1. SEGUIMIENTO DE OPERACIÓN SIMULADA ---
+            if len(ops_sim) > 0:
+                o = ops_sim[0]
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
+                
+                # Diferencia de precio y ROI Bruto
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                
-                # --- CÁLCULO DE COMISIÓN ---
-                # Binance cobra ~0.04% por trade. Entrar + Salir = 0.08%.
-                # En ROI (apalancado), eso es 0.08 * apalancamiento.
-                comision_roi = 0.08 * o['x']
                 roi_bruto = diff * 100 * o['x']
-                roi_neto = roi_bruto - comision_roi # Lo que te queda REAL
                 
-                # SALTO A 15X (Ahora basado en ganancia real)
+                # Descontamos comisión (0.08% total * apalancamiento)
+                comision_roi = 0.08 * o['x']
+                roi_neto = roi_bruto - comision_roi
+                
+                # SALTO MÁGICO A 15X (Si el neto es bueno)
                 if roi_neto > 0.3 and o['x'] == 5:
-                    try:
-                        c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'] = 15
-                        print(f"🔥 OPORTUNIDAD: Subiendo a 15x en {o['s']}")
-                    except: pass
+                    o['x'] = 15
+                    print(f"🔥 SIM_OPORTUNIDAD: Subiendo a 15x en {o['s']}")
 
-                # CIERRES (Profit 2.5% NETO o Stop -1.5% NETO)
-                # Subí el Stop a -1.5% para que la comisión no te saque apenas entrás
+                # CIERRES (Netos)
                 if roi_neto >= 2.5 or roi_neto <= -1.5:
-                    c.futures_create_order(symbol=o['s'], side=("SELL" if o['l']=="LONG" else "BUY"), type='MARKET', quantity=o['q'])
-                    ops.remove(o)
-                    print(f"✅ CIERRE NETO: {roi_neto:.2f}%")
-                    time.sleep(30); break # Pausa para que el mercado respire
+                    saldo_sim += (o['monto'] * roi_neto / 100)
+                    print(f"\n✅ SIM_CIERRE {o['s']} | NETO: {roi_neto:.2f}% | Saldo: ${saldo_sim:.2f}")
+                    ops_sim.pop()
+                    time.sleep(10)
 
-            # --- ENTRADA ---
-            if len(ops) < 1 and cap >= 12:
+            # --- 2. ENTRADA SIMULADA ---
+            elif saldo_sim >= 10:
                 for m in monedas:
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
+                    # Lógica de cruce de medias
                     if cl[-2] > e9 and e9 > e27:
                         precio = float(c.get_symbol_ticker(symbol=m)['price'])
-                        qty = round((cap * 0.90 * 5) / precio, 3 if 'BTC' in m or 'ETH' in m else 1)
-                        
-                        if qty > 0:
-                            c.futures_change_leverage(symbol=m, leverage=5)
-                            c.futures_create_order(symbol=m, side='BUY', type='MARKET', quantity=qty)
-                            ops.append({'s':m,'l':'LONG','p':precio,'q':qty, 'x':5})
-                            print(f"🎯 ENTRADA 5X EN {m}")
-                            # Esperamos 5 segundos para que la orden impacte
-                            time.sleep(5); break
+                        ops_sim.append({
+                            's': m, 'l': 'LONG', 'p': precio, 
+                            'monto': saldo_sim, 'x': 5
+                        })
+                        print(f"\n🎯 SIM_ENTRADA 5X EN {m}")
+                        break
 
-            print(f"💰 CAP: ${cap:.2f} | Activas: {len(ops)} | 5x/15x          ", end='\r')
+            # STATUS
+            if len(ops_sim) == 0:
+                print(f"📊 SALDO SIM: ${saldo_sim:.2f} | Buscando cruce E9/E27...      ", end='\r')
+            else:
+                print(f"⏳ EN POSICIÓN: {ops_sim[0]['s']} | ROI NETO: {roi_neto:.2f}%      ", end='\r')
 
-        except Exception as e:
-            print(f"⚠️ Log: {e}")
-            time.sleep(10)
-        time.sleep(5) # Escaneo cada 5 seg para no saturar
+        except: time.sleep(5)
+        time.sleep(2)
 
 if __name__ == "__main__": bot()
