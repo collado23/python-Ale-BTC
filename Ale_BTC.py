@@ -16,12 +16,12 @@ def g_m(leer=False, d=None):
     if not r: return c_i
     try:
         if leer:
-            h = r.get("cap_v146_ganancia")
+            h = r.get("cap_v146_final_roi")
             return float(h) if h else c_i
-        else: r.set("cap_v146_ganancia", str(d))
+        else: r.set("cap_v146_final_roi", str(d))
     except: return c_i
 
-# --- 🚀 3. MOTOR V146 ALE (DETALLE DE GANANCIA $) ---
+# --- 🚀 3. MOTOR V146 ALE (ROI EN VIVO + GANANCIA $) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client(); cap = g_m(leer=True); ops = []
@@ -29,11 +29,13 @@ def bot():
 
     while True:
         t_l = time.time()
+        roi_vico = 0.0 # Para mostrar en el print de abajo
         try:
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 roi = diff * 100 * o['x']
+                roi_vico = roi # Guardamos para el monitor
                 
                 # 1. SALTO A 15X (En 2.0% ROI)
                 if roi >= 2.0 and not o['be']: 
@@ -55,27 +57,25 @@ def bot():
                     
                     if n_p > o['piso']:
                         o['piso'] = n_p
-                        print(f"🛡️ ESCALADOR: {o['s']} | Piso: {o['piso']}%")
+                        print(f"🛡️ ESCALADOR: {o['s']} | Piso: {o['piso']}% | ROI: {roi:.2f}%")
 
                     # CIERRE POR PISO
                     if roi < o['piso']:
                         ganancia_usd = cap * (roi / 100)
                         n_c = cap + ganancia_usd
                         g_m(d=n_c); ops.remove(o); cap = n_c
-                        print(f"\n✅ COBRO: {o['s']}")
+                        print(f"\n✅ COBRO: {o['s']} | ROI Final: {roi:.2f}%")
                         print(f"   📈 GANANCIA: +${ganancia_usd:.2f}")
                         print(f"   📍 Entró: {o['p']} | Salió: {p_a}")
-                        print(f"   📊 ROI Final: {roi:.2f}%")
                         continue
 
-                # 3. STOP LOSS (-2.5%)
+                # 3. STOP LOSS DE SEGURIDAD (-2.5%)
                 if not o['be'] and roi <= -2.5:
                     perdida_usd = cap * (roi / 100)
                     n_c = cap + perdida_usd
                     g_m(d=n_c); ops.remove(o); cap = n_c
-                    print(f"\n⚠️ STOP LOSS: {o['s']}")
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | ROI: {roi:.2f}%")
                     print(f"   📉 PÉRDIDA: ${perdida_usd:.2f}")
-                    print(f"   📊 ROI: {roi:.2f}%")
 
             # --- 🎯 BUSCADOR EXCLUSIVO ---
             if len(ops) < 1:
@@ -94,7 +94,10 @@ def bot():
                         print(f"\n🎯 ENTRADA SHORT: {m} a {cl[-1]}")
                         break
 
-            print(f"💰 Total: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
+            # ESTO ES LO QUE QUERÍAS: Ver el ROI mientras parpadea el bot
+            txt_roi = f" | ROI: {roi_vico:.2f}%" if len(ops) > 0 else ""
+            print(f"💰 Total: ${cap:.2f}{txt_roi} | {time.strftime('%H:%M:%S')}", end='\r')
+            
         except: time.sleep(5)
         time.sleep(max(1, 10 - (time.time() - t_l)))
 
