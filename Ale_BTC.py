@@ -10,7 +10,7 @@ def bot():
     ultima_moneda = ""
     tiempo_descanso = 0
 
-    print(f"🐊 MOTOR V146 FULL | SALTO 15X AL 1.5% | DESCANSO 10S | $10")
+    print(f"🐊 MOTOR V146 FULL | SALTO 15X AL 1.5% | DESCANSO 10S | $10") 
 
     while True:
         t_l = time.time()
