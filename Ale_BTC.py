@@ -16,35 +16,37 @@ def g_m(leer=False, d=None):
     if not r: return c_i
     try:
         if leer:
-            h = r.get("cap_v146_final_roi")
+            h = r.get("cap_v146_ale_final")
             return float(h) if h else c_i
-        else: r.set("cap_v146_final_roi", str(d))
+        else: r.set("cap_v146_ale_final", str(d))
     except: return c_i
 
-# --- 🚀 3. MOTOR V146 ALE (ROI EN VIVO + GANANCIA $) ---
+# --- 🚀 3. MOTOR V146 ALE (CON COMISIÓN -0.90%) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client(); cap = g_m(leer=True); ops = []
-    print(f"🐊 V146 ALE | FOCO: SOL-XRP-BNB | ${cap}")
+    print(f"🐊 V146 ALE FINAL | COMISIÓN -0.90% | ${cap}")
 
     while True:
         t_l = time.time()
-        roi_vico = 0.0 # Para mostrar en el print de abajo
+        roi_vivo = 0.0
         try:
             for o in ops[:]:
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi = diff * 100 * o['x']
-                roi_vico = roi # Guardamos para el monitor
                 
-                # 1. SALTO A 15X (En 2.0% ROI)
+                # APLICAMOS EL -0.90% DE COMISIÓN AL ROI
+                roi = (diff * 100 * o['x']) - 0.90
+                roi_vivo = roi 
+                
+                # 1. SALTO A 15X (Cuando el ROI neto llega a 2.0%)
                 if roi >= 2.0 and not o['be']: 
                     o['x'] = 15
                     o['be'] = True 
                     o['piso'] = 1.5 
                     print(f"\n🔥 SALTO A 15X: {o['s']} | Entró: {o['p']}")
 
-                # 2. ESCALADOR INTERCALADO (Margen 0.5%)
+                # 2. ESCALADOR INTERCALADO (A 0.5% DE DISTANCIA)
                 if o['be']:
                     n_p = o['piso']
                     if roi >= 25.0: n_p = 24.5
@@ -57,16 +59,16 @@ def bot():
                     
                     if n_p > o['piso']:
                         o['piso'] = n_p
-                        print(f"🛡️ ESCALADOR: {o['s']} | Piso: {o['piso']}% | ROI: {roi:.2f}%")
+                        print(f"🛡️ ESCALADOR: {o['s']} | Nuevo Piso: {o['piso']}% | ROI: {roi:.2f}%")
 
-                    # CIERRE POR PISO
+                    # CIERRE POR PISO (Asegura ganancia neta)
                     if roi < o['piso']:
                         ganancia_usd = cap * (roi / 100)
                         n_c = cap + ganancia_usd
                         g_m(d=n_c); ops.remove(o); cap = n_c
-                        print(f"\n✅ COBRO: {o['s']} | ROI Final: {roi:.2f}%")
+                        print(f"\n✅ COBRO REALIZADO: {o['s']} | ROI Neto: {roi:.2f}%")
                         print(f"   📈 GANANCIA: +${ganancia_usd:.2f}")
-                        print(f"   📍 Entró: {o['p']} | Salió: {p_a}")
+                        print(f"   📍 Entrada: {o['p']} | Salida: {p_a}")
                         continue
 
                 # 3. STOP LOSS DE SEGURIDAD (-2.5%)
@@ -74,10 +76,10 @@ def bot():
                     perdida_usd = cap * (roi / 100)
                     n_c = cap + perdida_usd
                     g_m(d=n_c); ops.remove(o); cap = n_c
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | ROI: {roi:.2f}%")
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | ROI Neto: {roi:.2f}%")
                     print(f"   📉 PÉRDIDA: ${perdida_usd:.2f}")
 
-            # --- 🎯 BUSCADOR EXCLUSIVO ---
+            # --- 🎯 BUSCADOR EXCLUSIVO (SOL, XRP, BNB) ---
             if len(ops) < 1:
                 for m in ['SOLUSDT', 'XRPUSDT', 'BNBUSDT']:
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
@@ -94,8 +96,8 @@ def bot():
                         print(f"\n🎯 ENTRADA SHORT: {m} a {cl[-1]}")
                         break
 
-            # ESTO ES LO QUE QUERÍAS: Ver el ROI mientras parpadea el bot
-            txt_roi = f" | ROI: {roi_vico:.2f}%" if len(ops) > 0 else ""
+            # MONITOR EN TIEMPO REAL
+            txt_roi = f" | ROI: {roi_vivo:.2f}%" if len(ops) > 0 else ""
             print(f"💰 Total: ${cap:.2f}{txt_roi} | {time.strftime('%H:%M:%S')}", end='\r')
             
         except: time.sleep(5)
