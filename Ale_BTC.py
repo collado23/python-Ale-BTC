@@ -16,16 +16,16 @@ def g_m(leer=False, d=None):
     if not r: return c_i
     try:
         if leer:
-            h = r.get("cap_v146_final")
+            h = r.get("cap_v146_ganancia")
             return float(h) if h else c_i
-        else: r.set("cap_v146_final", str(d))
+        else: r.set("cap_v146_ganancia", str(d))
     except: return c_i
 
-# --- 🚀 3. MOTOR V146 ALE (PRECIOS DETALLADOS) ---
+# --- 🚀 3. MOTOR V146 ALE (DETALLE DE GANANCIA $) ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     c = Client(); cap = g_m(leer=True); ops = []
-    print(f"🐊 V146 ALE FINAL | SOL-XRP-BNB | ${cap}")
+    print(f"🐊 V146 ALE | FOCO: SOL-XRP-BNB | ${cap}")
 
     while True:
         t_l = time.time()
@@ -40,7 +40,7 @@ def bot():
                     o['x'] = 15
                     o['be'] = True 
                     o['piso'] = 1.5 
-                    print(f"\n🔥 SALTO A 15X: {o['s']} | Entró a: {o['p']} | Actual: {p_a}")
+                    print(f"\n🔥 SALTO A 15X: {o['s']} | Entró: {o['p']}")
 
                 # 2. ESCALADOR INTERCALADO (Margen 0.5%)
                 if o['be']:
@@ -55,22 +55,29 @@ def bot():
                     
                     if n_p > o['piso']:
                         o['piso'] = n_p
-                        print(f"🛡️ ESCALADOR: {o['s']} | Nuevo Piso: {o['piso']}% | Actual: {p_a}")
+                        print(f"🛡️ ESCALADOR: {o['s']} | Piso: {o['piso']}%")
 
-                    # GATILLO DE COBRO POR PISO
+                    # CIERRE POR PISO
                     if roi < o['piso']:
-                        n_c = cap * (1 + (roi/100))
+                        ganancia_usd = cap * (roi / 100)
+                        n_c = cap + ganancia_usd
                         g_m(d=n_c); ops.remove(o); cap = n_c
-                        print(f"\n✅ COBRO: {o['s']} | Entró a: {o['p']} | Salió a: {p_a} | ROI: {roi:.2f}%")
+                        print(f"\n✅ COBRO: {o['s']}")
+                        print(f"   📈 GANANCIA: +${ganancia_usd:.2f}")
+                        print(f"   📍 Entró: {o['p']} | Salió: {p_a}")
+                        print(f"   📊 ROI Final: {roi:.2f}%")
                         continue
 
-                # 3. STOP LOSS DE SEGURIDAD (-2.5%)
+                # 3. STOP LOSS (-2.5%)
                 if not o['be'] and roi <= -2.5:
-                    n_c = cap * (1 + (roi/100))
+                    perdida_usd = cap * (roi / 100)
+                    n_c = cap + perdida_usd
                     g_m(d=n_c); ops.remove(o); cap = n_c
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | Entró a: {o['p']} | Salió a: {p_a} | ROI: {roi:.2f}%")
+                    print(f"\n⚠️ STOP LOSS: {o['s']}")
+                    print(f"   📉 PÉRDIDA: ${perdida_usd:.2f}")
+                    print(f"   📊 ROI: {roi:.2f}%")
 
-            # --- 🎯 BUSCADOR EXCLUSIVO (SOL, XRP, BNB) ---
+            # --- 🎯 BUSCADOR EXCLUSIVO ---
             if len(ops) < 1:
                 for m in ['SOLUSDT', 'XRPUSDT', 'BNBUSDT']:
                     k = c.get_klines(symbol=m, interval='1m', limit=30)
@@ -80,14 +87,14 @@ def bot():
 
                     if v > o_v and v > e9 and e9 > e27:
                         ops.append({'s':m,'l':'LONG','p':cl[-1],'x':5,'be':False, 'piso': -2.5})
-                        print(f"\n🎯 DISPARO LONG: {m} | Precio Entrada: {cl[-1]}")
+                        print(f"\n🎯 ENTRADA LONG: {m} a {cl[-1]}")
                         break
                     if v < o_v and v < e9 and e9 < e27:
                         ops.append({'s':m,'l':'SHORT','p':cl[-1],'x':5,'be':False, 'piso': -2.5})
-                        print(f"\n🎯 DISPARO SHORT: {m} | Precio Entrada: {cl[-1]}")
+                        print(f"\n🎯 ENTRADA SHORT: {m} a {cl[-1]}")
                         break
 
-            print(f"💰 ${cap:.2f} | Activa: {len(ops)} | {time.strftime('%H:%M:%S')}", end='\r')
+            print(f"💰 Total: ${cap:.2f} | {time.strftime('%H:%M:%S')}", end='\r')
         except: time.sleep(5)
         time.sleep(max(1, 10 - (time.time() - t_l)))
 
