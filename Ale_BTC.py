@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client
+from binance.client import Client 
 
 # --- 🚀 MOTOR V146 ALE - VERSIÓN FINAL SALTO 1.5% ---
 def bot():
