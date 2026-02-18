@@ -1,29 +1,18 @@
-import os, time, redis, json, threading
-from http.server import BaseHTTPRequestHandler, HTTPServer 
+import os, time, threading
 from binance.client import Client
 
-# --- 🌐 1. SERVER DE SALUD ---
-class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
-def s_h():
-    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
-    except: pass
-
-# --- 🚀 2. MOTOR V146 SIMULACIÓN (SALTO AL 0.9%) ---
+# --- 🚀 MOTOR V146 ALE - VERSIÓN FINAL SALTO 1.5% ---
 def bot():
-    threading.Thread(target=s_h, daemon=True).start()
     c = Client()
-    cap = 10.0 
+    cap = 10.0  # Tu capital de prueba
     ops = []
     ultima_moneda = ""
     tiempo_descanso = 0
 
-    print(f"🐊 SIM V146 ULTRA-AGRESIVA | SALTO 15X AL 0.9% | $10")
+    print(f"🐊 SIM V146 FINAL | SALTO 15X AL 1.5% | PISO INICIAL 1.0%")
 
     while True:
         t_l = time.time()
-        ganancia_vivo_usd = 0.0
-        roi_vivo = 0.0
         ahora = time.time()
         
         try:
@@ -31,53 +20,50 @@ def bot():
                 p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
-                # ROI Neto (Precio - Comisión -0.90%)
+                # ROI Neto (ya restando el -0.90% de comisión)
                 roi = (diff * 100 * o['x']) - 0.90
-                roi_vivo = roi
-                ganancia_vivo_usd = cap * (roi / 100)
+                ganancia_usd = cap * (roi / 100)
                 
-                # 🔥 DISPARO AL 0.9% (Apenas salís del rojo de la comisión)
-                if roi >= 0.9 and not o['be']: 
+                # 🔥 EL SALTO QUE ME PEDISTE: AL 1.5%
+                if roi >= 1.5 and not o['be']: 
                     o['x'] = 15
                     o['be'] = True 
-                    o['piso'] = 0.4 # Piso inicial para asegurar el peaje
-                    print(f"\n🚀 ¡SALTO A 15X! (ROI: {roi:.2f}%) en {o['s']}")
+                    o['piso'] = 1.0  # <--- PROTECCIÓN AL 1.0%
+                    print(f"\n🚀 SALTO A 15X (1.5% TOCADO): {o['s']}")
 
-                # ESCALADOR (0.5% de margen siempre)
+                # 🛡️ EL ESCALADOR (Mantiene margen de 0.5%)
                 if o['be']:
                     n_p = o['piso']
                     if roi >= 25.0: n_p = 24.5
                     elif roi >= 20.0: n_p = 19.5
                     elif roi >= 15.0: n_p = 14.5
                     elif roi >= 10.0: n_p = 9.5
-                    elif roi >= 8.0:  n_p = 7.5
-                    elif roi >= 6.0:  n_p = 5.5
-                    elif roi >= 4.0:  n_p = 3.5
-                    elif roi >= 2.0:  n_p = 1.5
-                    elif roi >= 1.0:  n_p = 0.5 
+                    elif roi >= 5.0:  n_p = 4.5
+                    elif roi >= 2.5:  n_p = 2.0
+                    elif roi >= 2.0:  n_p = 1.5 # <--- ESCALÓN INTERMEDIO
                     
                     if n_p > o['piso']:
                         o['piso'] = n_p
                         print(f"🛡️ ESCALADOR: {o['s']} subió piso a {o['piso']}%")
 
-                    # CIERRE POR PISO
+                    # CIERRE POR PISO (GANANCIA)
                     if roi < o['piso']:
-                        cap = cap + ganancia_vivo_usd
+                        cap += ganancia_usd
                         ultima_moneda = o['s']
                         tiempo_descanso = ahora
-                        print(f"\n✅ COBRO SIM: {o['s']} | Netos: +${ganancia_vivo_usd:.2f}")
+                        print(f"\n✅ COBRO: {o['s']} | +${ganancia_usd:.2f} | PISO: {o['piso']}%")
                         ops.remove(o)
                         continue
 
-                # STOP LOSS (-2.5%)
+                # STOP LOSS (Mientras no saltó a 15x)
                 if not o['be'] and roi <= -2.5:
-                    cap = cap + ganancia_vivo_usd
+                    cap += ganancia_usd
                     ultima_moneda = o['s']
                     tiempo_descanso = ahora
-                    print(f"\n⚠️ STOP LOSS SIM: {o['s']} | -${abs(ganancia_vivo_usd):.2f}")
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | -${abs(ganancia_usd):.2f}")
                     ops.remove(o)
 
-            # --- 🎯 BUSCADOR ---
+            # --- 🎯 BUSCADOR (CON DESCANSO 10S Y ROTACIÓN) ---
             if len(ops) < 1 and (ahora - tiempo_descanso) > 10:
                 for m in ['SOLUSDT', 'XRPUSDT', 'BNBUSDT']:
                     if m == ultima_moneda: continue 
@@ -89,12 +75,14 @@ def bot():
                     if (v > o_v and v > e9 and e9 > e27) or (v < o_v and v < e9 and e9 < e27):
                         tipo = 'LONG' if v > o_v else 'SHORT'
                         ops.append({'s':m,'l':tipo,'p':cl[-1],'x':5,'be':False, 'piso': -2.5})
-                        print(f"\n🎯 ENTRADA SIM: {m} ({tipo})")
+                        print(f"\n🎯 ENTRADA: {m} ({tipo})")
                         break
-            
+            elif len(ops) < 1 and (ahora - tiempo_descanso) <= 10:
+                print(f"⏳ Pausa 10s... {int(10-(ahora-tiempo_descanso))}s", end='\r')
+
             # MONITOR
-            mon = f" | {ops[0]['s']}: ${ganancia_vivo_usd:.2f} ({roi_vivo:.2f}%)" if len(ops) > 0 else " | 🔎 Buscando..."
-            print(f"💰 Sim: ${cap:.2f}{mon} | {time.strftime('%H:%M:%S')}", end='\r')
+            if len(ops) > 0:
+                print(f"💰 Cap: ${cap:.2f} | {ops[0]['s']}: {roi:.2f}% (Piso: {ops[0]['piso']}%)", end='\r')
             
         except: time.sleep(5)
         time.sleep(1)
