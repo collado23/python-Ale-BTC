@@ -5,7 +5,7 @@ from binance.enums import *
 
 # --- 🌐 SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -19,14 +19,12 @@ def bot():
     tiempo_descanso = 0
 
     def tiene_posicion_abierta():
-        """ Consulta a Binance si hay posiciones abiertas reales """
         try:
             pos = c.futures_position_information()
             for p in pos:
-                if float(p['positionAmt']) != 0:
-                    return True # Hay algo abierto
-            return False # Todo cerrado
-        except: return True # Por seguridad, si falla la API, asumimos que hay algo
+                if float(p['positionAmt']) != 0: return True
+            return False
+        except: return True
 
     def obtener_saldo_futuros():
         try:
@@ -36,7 +34,7 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146 | CHECK REAL DE POSICIONES ACTIVADO | 15s ESPERA")
+    print(f"🐊 MOTOR V146 | COMPRA OPTIMIZADA | ESPERA 15s")
 
     while True:
         ahora = time.time()
@@ -46,7 +44,7 @@ def bot():
             saldo_api = obtener_saldo_futuros()
             saldo_actual = saldo_api if saldo_api > 0 else 10.0
 
-            # --- GESTIÓN DE OPERACIÓN INTERNA ---
+            # --- GESTIÓN DE OPERACIÓN ---
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_a) / o['p']
@@ -62,7 +60,6 @@ def bot():
                     print(f"\n🚀 ¡SALTO 15X! {o['s']} | ROI: {roi:.2f}%")
 
                 if o['be']:
-                    # --- 🛡️ TU ESCALADOR ORIGINAL ---
                     n_p = o['piso']
                     if roi >= 25.0:   n_p = 24.5
                     elif roi >= 20.0: n_p = 19.5
@@ -95,10 +92,7 @@ def bot():
                     ops.remove(o)
                     print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s...")
 
-            # --- 🎯 BUSCADOR CON CHECK REAL ---
-            # 1. No debe haber nada en la lista interna 'ops'
-            # 2. Deben haber pasado los 15 segundos
-            # 3. Binance debe confirmar que no hay ninguna posición abierta
+            # --- 🎯 BUSCADOR OPTIMIZADO ---
             if len(ops) == 0 and (ahora - tiempo_descanso) > 15:
                 if not tiene_posicion_abierta():
                     for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
@@ -114,32 +108,30 @@ def bot():
                             side_e = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
                             
                             try:
-                                p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                                cant = round((9.90 * 5) / p_act, 1) 
+                                # 1. Cambiamos palanca primero
                                 c.futures_change_leverage(symbol=m, leverage=5)
+                                time.sleep(1) # <--- Silencio de 1s para que Binance procese
+                                
+                                # 2. Recién ahora calculamos cantidad y compramos
+                                p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
+                                cant = round((9.80 * 5) / p_act, 1) # Usamos 9.80 para asegurar margen
+                                
                                 c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
                                 
-                                ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':9.90,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 ENTRADA REAL: {tipo} en {m}")
+                                ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':9.80,'x':5,'be':False, 'piso': -2.5})
+                                print(f"\n🎯 COMPRA EXITOSA: {tipo} en {m} a {p_act}")
                                 break
                             except Exception as e:
-                                print(f"\n❌ ERROR: {e}")
+                                print(f"\n❌ REBOTE: {e}")
                                 tiempo_descanso = ahora
                                 break
-                else:
-                    # Si hay una posición abierta que el bot no reconoce, avisa en el monitor
-                    pass
-                
+            
             # MONITOR
             if len(ops) > 0:
-                mon = f" | POSICIÓN: {ops[0]['s']} ({roi_vis:.2f}%)"
+                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% | Piso: {piso_vis}%"
             else:
-                if tiene_posicion_abierta():
-                    mon = " | ⚠️ ESPERANDO CIERRE MANUAL/OTRA APP..."
-                else:
-                    restante = max(0, int(15 - (ahora - tiempo_descanso)))
-                    mon = f" | ⏱️ ESPERA: {restante}s" if restante > 0 else f" | 🔎 BUSCANDO..."
-            
+                restante = max(0, int(15 - (ahora - tiempo_descanso)))
+                mon = f" | ⏱️ ESPERA: {restante}s" if restante > 0 else f" | 🔎 BUSCANDO..."
             print(f"💰 Cap: ${saldo_actual:.2f}{mon}", end='\r')
             
         except: time.sleep(1)
