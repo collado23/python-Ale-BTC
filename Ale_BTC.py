@@ -5,7 +5,7 @@ from binance.enums import *
 
 # --- 🌐 SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -26,7 +26,7 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146 REAL | BLOQUEO TRAS CIERRE ACTIVO | USDC")
+    print(f"🐊 MOTOR V146 | ESPERA DE 15s ACTIVADA | USDC")
 
     while True:
         ahora = time.time()
@@ -67,33 +67,27 @@ def bot():
                         o['piso'] = n_p
                         print(f"🛡️ ESCALADOR: {o['s']} subió piso a {o['piso']}%")
 
-                    # CIERRE POR PISO (GANANCIA)
                     if roi < o['piso']:
                         side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
-                        try: c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                        except: pass
-                        
-                        ultima_moneda = o['s'] # 🔒 BLOQUEO AL GANAR
-                        tiempo_descanso = ahora
-                        print(f"\n✅ VENTA GANADORA: {o['s']} | Ganancia: +{ganancia_usdc:.2f} USDC")
+                        c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                        ultima_moneda = o['s']
+                        tiempo_descanso = ahora # ⏱️ EMPIEZA CUENTA REGRESIVA
+                        print(f"\n✅ VENTA: {o['s']} | ROI: {roi:.2f}% | Esperando 15s...")
                         ops.remove(o)
                         continue
 
-                # --- ⚠️ STOP LOSS (PÉRDIDA) ---
                 if not o['be'] and roi <= -2.5:
                     side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
-                    try: c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    except: pass
-                    
-                    ultima_moneda = o['s'] # 🔒 BLOQUEO AL PERDER
-                    tiempo_descanso = ahora
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | Perdida: {ganancia_usdc:.2f} USDC")
+                    c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                    ultima_moneda = o['s']
+                    tiempo_descanso = ahora # ⏱️ EMPIEZA CUENTA REGRESIVA
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s...")
                     ops.remove(o)
 
-            # --- 🎯 BUSCADOR CON FILTRO DE MONEDA ---
-            if len(ops) < 1 and (ahora - tiempo_descanso) > 10:
+            # --- 🎯 BUSCADOR CON ESPERA DE 15 SEGUNDOS ---
+            if len(ops) < 1 and (ahora - tiempo_descanso) > 15:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
-                    if m == ultima_moneda: continue # SALTA LA ÚLTIMA OPERADA
+                    if m == ultima_moneda: continue 
                     
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
@@ -111,15 +105,21 @@ def bot():
                             cant = round((10.0 * 5) / p_act, 1) 
                             c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
                             ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':10.0,'x':5,'be':False, 'piso': -2.5})
-                            print(f"✔️ OK: {cant} {m}")
+                            print(f"✔️ COMPRA OK: {cant} {m}")
                         except Exception as e:
                             print(f"❌ ERROR: {e}")
+                            tiempo_descanso = ahora # Si falla por margen, que espere 15s más
                         break
             
+            # MONITOR LOG
             if len(ops) > 0:
-                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% (${gan_vis:.2f}) | Piso: {piso_vis}%"
+                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% | Piso: {piso_vis}%"
             else:
-                mon = f" | 🔎 Buscando... (Bloqueada: {ultima_moneda})"
+                restante = max(0, int(15 - (ahora - tiempo_descanso)))
+                if restante > 0:
+                    mon = f" | ⏱️ Descanso: {restante}s"
+                else:
+                    mon = f" | 🔎 Buscando... (Bloqueada: {ultima_moneda})"
             print(f"💰 Cap: ${saldo_actual:.2f}{mon}", end='\r')
             
         except: time.sleep(10)
