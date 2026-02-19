@@ -1,6 +1,7 @@
 import os, time, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
+from binance.enums import *
 
 # --- 🌐 SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
@@ -11,57 +12,50 @@ def s_h():
 
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET")
-    c = Client(api_key, api_secret)
+    
+    # Usa tus variables de entorno BINANCE_API_KEY y BINANCE_API_SECRET
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     
     ops = []
     ultima_moneda = ""
     tiempo_descanso = 0
 
-    # --- 💰 ESCÁNER DE BILLETERA USDC ---
-    def obtener_saldo_total():
+    def obtener_saldo_futuros():
         try:
-            # Busca USDC en Spot
-            s = c.get_asset_balance(asset='USDC')
-            saldo_spot = float(s['free']) if s else 0.0
-            # Busca USDC en Futuros
             f = c.futures_account_balance()
-            saldo_fut = next((float(i['balance']) for i in f if i['asset'] == 'USDC'), 0.0)
-            return saldo_spot + saldo_fut
+            return next((float(i['balance']) for i in f if i['asset'] == 'USDC'), 0.0)
         except: return 0.0
 
-    print(f"🐊 MOTOR V146 REAL | MONEDA: USDC | SALTO 15X AL 1.5%")
+    print(f"🐊 !!! FUTUROS REAL V146 !!! | ESCALADOR ORIGINAL | USDC")
 
     while True:
         ahora = time.time()
         roi_vis, gan_vis, piso_vis = 0.0, 0.0, -2.5
         
         try:
-            # Actualiza el capital con lo que hay en USDC
-            cap = obtener_saldo_total()
-            if cap == 0: cap = 10.0 # Valor de seguridad por si falla la API
+            saldo_usdc = obtener_saldo_futuros()
 
             for o in ops[:]:
-                # Usamos pares con USDC
-                p_a = float(c.get_symbol_ticker(symbol=o['s'])['price'])
-                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
+                p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
+                diff = (p_a - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_a) / o['p']
                 
                 roi = (diff * 100 * o['x']) - 0.90
-                ganancia_usdc = cap * (roi / 100)
+                ganancia_usdc = o['inv'] * (roi / 100)
                 roi_vis, gan_vis, piso_vis = roi, ganancia_usdc, o['piso']
                 
-                # 🔥 SALTO 15X AL 1.5%
+                # 🔥 EL SALTO AL 1.5%
                 if roi >= 1.5 and not o['be']: 
                     o['x'] = 15
                     o['be'] = True 
                     o['piso'] = 1.0 
-                    print(f"\n🚀 ¡SALTO 15X! {o['s']} | Entré a: {o['p']} | ROI: {roi:.2f}%")
+                    print(f"\n🚀 ¡SALTO 15X! {o['s']} | ROI: {roi:.2f}%")
 
-                # 🛡️ ESCALADOR AGRESIVO (Con el 6% incluido)
+                # 🛡️ TU ESCALADOR ORIGINAL (SIN CAMBIOS)
                 if o['be']:
                     n_p = o['piso']
                     if roi >= 25.0:   n_p = 24.5
+                    elif roi >= 20.0: n_p = 19.5
+                    elif roi >= 15.0: n_p = 14.5
                     elif roi >= 10.0: n_p = 9.5
                     elif roi >= 8.0:  n_p = 7.5
                     elif roi >= 6.0:  n_p = 5.5
@@ -71,9 +65,12 @@ def bot():
                     
                     if n_p > o['piso']:
                         o['piso'] = n_p
-                        print(f"🛡️ ESCALADOR: {o['s']} subió piso a {o['piso']}% | ROI: {roi:.2f}%")
+                        print(f"🛡️ ESCALADOR: {o['s']} subió piso a {o['piso']}%")
 
+                    # CIERRE POR PISO
                     if roi < o['piso']:
+                        side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
+                        c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
                         ultima_moneda = o['s']
                         tiempo_descanso = ahora
                         print(f"\n✅ VENTA: {o['s']} | Compra: {o['p']} | Venta: {p_a} | Ganancia: +{ganancia_usdc:.2f} USDC | ROI: {roi:.2f}%")
@@ -82,41 +79,46 @@ def bot():
 
                 # ⚠️ STOP LOSS
                 if not o['be'] and roi <= -2.5:
+                    side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
+                    c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
                     ultima_moneda = o['s']
                     tiempo_descanso = ahora
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | Perdida: {ganancia_usdc:.2f} USDC | ROI: {roi:.2f}%")
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | Perdida: {ganancia_usdc:.2f} USDC")
                     ops.remove(o)
 
-            # --- 🎯 BUSCADOR (PARES USDC) ---
-            if len(ops) < 1 and (ahora - tiempo_descanso) > 10:
-                # Cambiamos a pares con USDC
-                monedas = ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']
-                for m in monedas:
+            # --- 🎯 BUSCADOR ---
+            if len(ops) < 1 and (ahora - tiempo_descanso) > 10 and saldo_usdc >= 10:
+                for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     if m == ultima_moneda: continue 
-                    k = c.get_klines(symbol=m, interval='1m', limit=30)
+                    k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
                     v, o_v = cl[-2], float(k[-2][1])
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
 
                     if (v > o_v and v > e9 and e9 > e27) or (v < o_v and v < e9 and e9 < e27):
                         tipo = 'LONG' if v > o_v else 'SHORT'
-                        ops.append({'s':m,'l':tipo,'p':cl[-1],'x':5,'be':False, 'piso': -2.5})
-                        print(f"\n🎯 ENTRADA REAL: {m} | Precio: {cl[-1]} | Tipo: {tipo} | Cap: {cap:.2f} USDC")
+                        side_entrada = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
+                        print(f"\n🎯 ABRIENDO {tipo} EN {m}...")
+                        
+                        c.futures_change_leverage(symbol=m, leverage=5)
+                        precio_actual = float(c.futures_symbol_ticker(symbol=m)['price'])
+                        # Ajustamos la cantidad para que sean $10
+                        cantidad = round((10.0 * 5) / precio_actual, 1) 
+                        
+                        c.futures_create_order(symbol=m, side=side_entrada, type=ORDER_TYPE_MARKET, quantity=cantidad)
+                        ops.append({'s':m,'l':tipo,'p':precio_actual,'q':cantidad,'inv':10.0,'x':5,'be':False, 'piso': -2.5})
+                        print(f"✔️ OK: {cantidad} {m} a {precio_actual}")
                         break
             
-            # --- 🕒 MONITOR DETALLADO ---
             if len(ops) > 0:
-                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% ({gan_vis:.2f} USDC) | Piso: {piso_vis}%"
-            elif (ahora - tiempo_descanso) <= 10:
-                mon = f" | ⏳ Pausa: {int(10-(ahora-tiempo_descanso))}s"
+                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% (${gan_vis:.2f}) | Piso: {piso_vis}%"
             else:
-                mon = " | 🔎 Buscando oportunidad..."
-
-            print(f"💰 Billetera: {cap:.2f} USDC{mon} | {time.strftime('%H:%M:%S')}", end='\r')
+                mon = f" | 🔎 Buscando... (Saldo: {saldo_usdc:.2f} USDC)"
+            print(f"💰 Billetera: {saldo_usdc:.2f} USDC{mon}", end='\r')
             
         except Exception as e:
-            time.sleep(5)
-            
+            print(f"\n❌ ERROR: {e}")
+            time.sleep(10)
         time.sleep(1)
 
 if __name__ == "__main__": bot()
