@@ -18,6 +18,16 @@ def bot():
     ultima_moneda = ""
     tiempo_descanso = 0
 
+    def tiene_posicion_abierta():
+        """ Consulta a Binance si hay posiciones abiertas reales """
+        try:
+            pos = c.futures_position_information()
+            for p in pos:
+                if float(p['positionAmt']) != 0:
+                    return True # Hay algo abierto
+            return False # Todo cerrado
+        except: return True # Por seguridad, si falla la API, asumimos que hay algo
+
     def obtener_saldo_futuros():
         try:
             balances = c.futures_account_balance()
@@ -26,7 +36,7 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146 | FILTRO ANTI-DOBLE COMPRA | 15s ESPERA")
+    print(f"🐊 MOTOR V146 | CHECK REAL DE POSICIONES ACTIVADO | 15s ESPERA")
 
     while True:
         ahora = time.time()
@@ -36,7 +46,7 @@ def bot():
             saldo_api = obtener_saldo_futuros()
             saldo_actual = saldo_api if saldo_api > 0 else 10.0
 
-            # --- GESTIÓN DE OPERACIÓN ABIERTA ---
+            # --- GESTIÓN DE OPERACIÓN INTERNA ---
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_a) / o['p']
@@ -72,23 +82,25 @@ def bot():
                         side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                         c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
                         ultima_moneda = o['s']
-                        tiempo_descanso = ahora # Inicia descanso
-                        ops.remove(o) # Vacía la lista
-                        print(f"\n✅ CIERRE POSITIVO: {o['s']} | Esperando 15s para limpiar margen...")
+                        tiempo_descanso = ahora 
+                        ops.remove(o)
+                        print(f"\n✅ CIERRE: {o['s']} | Esperando 15s...")
                         continue
 
                 if not o['be'] and roi <= -2.5:
                     side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
                     ultima_moneda = o['s']
-                    tiempo_descanso = ahora # Inicia descanso
-                    ops.remove(o) # Vacía la lista
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s para limpiar margen...")
+                    tiempo_descanso = ahora 
+                    ops.remove(o)
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s...")
 
-            # --- 🎯 BUSCADOR BLINDADO ---
-            # Solo entra si la lista está realmente vacía Y pasaron los 15 segundos
-            if len(ops) == 0: 
-                if (ahora - tiempo_descanso) > 15:
+            # --- 🎯 BUSCADOR CON CHECK REAL ---
+            # 1. No debe haber nada en la lista interna 'ops'
+            # 2. Deben haber pasado los 15 segundos
+            # 3. Binance debe confirmar que no hay ninguna posición abierta
+            if len(ops) == 0 and (ahora - tiempo_descanso) > 15:
+                if not tiene_posicion_abierta():
                     for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                         if m == ultima_moneda: continue 
                         
@@ -102,27 +114,31 @@ def bot():
                             side_e = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
                             
                             try:
-                                precio_actual = float(c.futures_symbol_ticker(symbol=m)['price'])
-                                cantidad = round((9.90 * 5) / precio_actual, 1) 
-                                
+                                p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
+                                cant = round((9.90 * 5) / p_act, 1) 
                                 c.futures_change_leverage(symbol=m, leverage=5)
-                                c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cantidad)
+                                c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
                                 
-                                # Solo después de la orden exitosa, llenamos la lista ops
-                                ops.append({'s':m,'l':tipo,'p':precio_actual,'q':cantidad,'inv':9.90,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 NUEVA OPERACIÓN: {tipo} en {m}")
+                                ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':9.90,'x':5,'be':False, 'piso': -2.5})
+                                print(f"\n🎯 ENTRADA REAL: {tipo} en {m}")
                                 break
                             except Exception as e:
-                                print(f"\n❌ REBOTE BINANCE: {e}")
-                                tiempo_descanso = ahora # Si rebota, reseteamos los 15s
+                                print(f"\n❌ ERROR: {e}")
+                                tiempo_descanso = ahora
                                 break
+                else:
+                    # Si hay una posición abierta que el bot no reconoce, avisa en el monitor
+                    pass
                 
             # MONITOR
             if len(ops) > 0:
-                mon = f" | ABIERTA: {ops[0]['s']} ({roi_vis:.2f}%)"
+                mon = f" | POSICIÓN: {ops[0]['s']} ({roi_vis:.2f}%)"
             else:
-                restante = max(0, int(15 - (ahora - tiempo_descanso)))
-                mon = f" | ⏱️ ESPERA: {restante}s" if restante > 0 else f" | 🔎 BUSCANDO... (Ult: {ultima_moneda})"
+                if tiene_posicion_abierta():
+                    mon = " | ⚠️ ESPERANDO CIERRE MANUAL/OTRA APP..."
+                else:
+                    restante = max(0, int(15 - (ahora - tiempo_descanso)))
+                    mon = f" | ⏱️ ESPERA: {restante}s" if restante > 0 else f" | 🔎 BUSCANDO..."
             
             print(f"💰 Cap: ${saldo_actual:.2f}{mon}", end='\r')
             
