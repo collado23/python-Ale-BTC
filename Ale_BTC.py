@@ -16,7 +16,8 @@ def bot():
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
-    
+
+    cap = 10.0
     ops = []
     ultima_moneda = ""
     tiempo_descanso = 0
