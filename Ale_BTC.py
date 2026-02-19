@@ -26,7 +26,7 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146 | ESPERA DE 15s ACTIVADA | USDC")
+    print(f"🐊 MOTOR V146 | FIX DE MARGEN | ESPERA 15s ACTIVADA")
 
     while True:
         ahora = time.time()
@@ -71,8 +71,8 @@ def bot():
                         side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                         c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
                         ultima_moneda = o['s']
-                        tiempo_descanso = ahora # ⏱️ EMPIEZA CUENTA REGRESIVA
-                        print(f"\n✅ VENTA: {o['s']} | ROI: {roi:.2f}% | Esperando 15s...")
+                        tiempo_descanso = ahora # <--- BLOQUEO DE 15s AL CERRAR
+                        print(f"\n✅ VENTA: {o['s']} | Ganancia: +{ganancia_usdc:.2f} USDC | Esperando 15s...")
                         ops.remove(o)
                         continue
 
@@ -80,11 +80,11 @@ def bot():
                     side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
                     ultima_moneda = o['s']
-                    tiempo_descanso = ahora # ⏱️ EMPIEZA CUENTA REGRESIVA
+                    tiempo_descanso = ahora # <--- BLOQUEO DE 15s AL CERRAR
                     print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s...")
                     ops.remove(o)
 
-            # --- 🎯 BUSCADOR CON ESPERA DE 15 SEGUNDOS ---
+            # --- 🎯 BUSCADOR CON ESPERA OBLIGATORIA ---
             if len(ops) < 1 and (ahora - tiempo_descanso) > 15:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     if m == ultima_moneda: continue 
@@ -97,21 +97,24 @@ def bot():
                     if (v > o_v and v > e9 and e9 > e27) or (v < o_v and v < e9 and e9 < e27):
                         tipo = 'LONG' if v > o_v else 'SHORT'
                         side_e = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
-                        print(f"\n🎯 ABRIENDO {tipo} EN {m}...")
                         
                         try:
+                            # Bajamos a 9.90 para que siempre sobre un poquito de margen por las dudas
+                            precio_actual = float(c.futures_symbol_ticker(symbol=m)['price'])
+                            cantidad = round((9.90 * 5) / precio_actual, 1) 
+                            
                             c.futures_change_leverage(symbol=m, leverage=5)
-                            p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                            cant = round((10.0 * 5) / p_act, 1) 
-                            c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
-                            ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':10.0,'x':5,'be':False, 'piso': -2.5})
-                            print(f"✔️ COMPRA OK: {cant} {m}")
+                            c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cantidad)
+                            
+                            ops.append({'s':m,'l':tipo,'p':precio_actual,'q':cantidad,'inv':9.90,'x':5,'be':False, 'piso': -2.5})
+                            print(f"\n🎯 COMPRA OK: {tipo} en {m} (${cantidad})")
+                            break
                         except Exception as e:
-                            print(f"❌ ERROR: {e}")
-                            tiempo_descanso = ahora # Si falla por margen, que espere 15s más
-                        break
+                            print(f"\n❌ ERROR COMPRA: {e}")
+                            tiempo_descanso = ahora # Si falla, que espere 15s más antes de reintentar
+                            break
             
-            # MONITOR LOG
+            # MONITOR
             if len(ops) > 0:
                 mon = f" | {ops[0]['s']}: {roi_vis:.2f}% | Piso: {piso_vis}%"
             else:
@@ -122,7 +125,7 @@ def bot():
                     mon = f" | 🔎 Buscando... (Bloqueada: {ultima_moneda})"
             print(f"💰 Cap: ${saldo_actual:.2f}{mon}", end='\r')
             
-        except: time.sleep(10)
+        except: time.sleep(1)
         time.sleep(1)
 
 if __name__ == "__main__": bot()
