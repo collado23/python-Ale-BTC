@@ -4,7 +4,7 @@ from binance.client import Client
 from binance.enums import *
 
 # --- 🌐 SERVER DE SALUD ---
-class H(BaseHTTPRequestHandler):
+class H(BaseHTTPRequestHandler): 
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
