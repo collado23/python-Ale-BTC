@@ -17,6 +17,7 @@ def bot():
     ops = []
     ultima_moneda = ""
     tiempo_descanso = 0
+    bloqueo_activo = False 
 
     def tiene_posicion_abierta():
         try:
@@ -34,36 +35,33 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146.2 | MARGEN DINÁMICO | STOP LOSS -2.5%")
+    print(f"🐊 MOTOR V146.3 | INSTALACIÓN LIMPIA | MARGEN 85%")
 
     while True:
         ahora = time.time()
         roi_vis, gan_vis, piso_vis = 0.0, 0.0, -2.5
         
         try:
+            if bloqueo_activo and (ahora - tiempo_descanso) > 15:
+                bloqueo_activo = False
+                print("\n🔓 CERROJO LIBERADO: Buscador listo.")
+
             saldo_api = obtener_saldo_futuros()
             saldo_actual = saldo_api if saldo_api > 0 else 10.0
 
-            # --- GESTIÓN DE OPERACIÓN ---
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_a) / o['p']
-                
                 roi = (diff * 100 * o['x']) - 0.90
-                ganancia_usdc = o['inv'] * (roi / 100)
-                roi_vis, gan_vis, piso_vis = roi, ganancia_usdc, o['piso']
+                roi_vis, gan_vis, piso_vis = roi, o['inv'] * (roi / 100), o['piso']
                 
-                # 🔥 EL SALTO AL 1.5%
                 if roi >= 1.5 and not o['be']: 
-                    o['x'] = 15
-                    o['be'] = True 
-                    o['piso'] = 1.0 
+                    o['x'] = 15; o['be'] = True; o['piso'] = 1.0 
                     print(f"\n🚀 ¡SALTO 15X! {o['s']} | ROI: {roi:.2f}%")
 
                 if o['be']:
-                    # 🛡️ ESCALADOR
                     n_p = o['piso']
-                    if roi >= 25.0:   n_p = 24.5
+                    if roi >= 25.0: n_p = 24.5
                     elif roi >= 20.0: n_p = 19.5
                     elif roi >= 15.0: n_p = 14.5
                     elif roi >= 10.0: n_p = 9.5
@@ -72,70 +70,45 @@ def bot():
                     elif roi >= 4.0:  n_p = 3.5
                     elif roi >= 2.5:  n_p = 2.0
                     elif roi >= 2.0:  n_p = 1.5
-                    
-                    if n_p > o['piso']:
-                        o['piso'] = n_p
-                        print(f"🛡️ ESCALADOR: {o['s']} subió piso a {o['piso']}%")
+                    if n_p > o['piso']: o['piso'] = n_p
 
                     if roi < o['piso']:
                         side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                         c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                        ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o)
-                        print(f"\n✅ CIERRE: {o['s']} | ROI: {roi:.2f}%")
+                        ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o); bloqueo_activo = True
                         continue
 
-                # ⚠️ STOP LOSS -2.5% REAL
                 if not o['be'] and roi <= -2.5:
                     side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o)
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | ROI: {roi:.2f}%")
+                    ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o); bloqueo_activo = True
 
-            # --- 🎯 BUSCADOR CON MARGEN INTELIGENTE ---
-            if len(ops) == 0 and (ahora - tiempo_descanso) > 15:
+            if not bloqueo_activo and len(ops) == 0:
                 if not tiene_posicion_abierta():
                     for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                         if m == ultima_moneda: continue 
-                        
                         k = c.futures_klines(symbol=m, interval='1m', limit=30)
-                        cl = [float(x[4]) for x in k]
-                        v, o_v = cl[-2], float(k[-2][1])
+                        cl = [float(x[4]) for x in k]; v, o_v = cl[-2], float(k[-2][1])
                         e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
 
                         if (v > o_v and v > e9 and e9 > e27) or (v < o_v and v < e9 and e9 < e27):
                             tipo = 'LONG' if v > o_v else 'SHORT'
-                            side_e = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
-                            
                             try:
-                                # Usamos el 90% del saldo real para evitar el error de margen
-                                saldo_disponible = obtener_saldo_futuros()
-                                inversion = saldo_disponible * 0.90 
-                                
+                                inversion = obtener_saldo_futuros() * 0.85 
                                 c.futures_change_leverage(symbol=m, leverage=5)
-                                time.sleep(1) 
-                                
+                                time.sleep(1.5)
                                 p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                                # Cálculo de cantidad con el 90% del capital
                                 cant = round((inversion * 5) / p_act, 1) 
-                                
                                 if cant > 0:
-                                    c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
+                                    c.futures_create_order(symbol=m, side=(SIDE_BUY if tipo == 'LONG' else SIDE_SELL), type=ORDER_TYPE_MARKET, quantity=cant)
                                     ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':inversion,'x':5,'be':False, 'piso': -2.5})
-                                    print(f"\n🎯 COMPRA EXITOSA: {tipo} en {m} con ${inversion:.2f}")
                                     break
-                            except Exception as e:
-                                print(f"\n❌ REBOTE: {e}")
-                                tiempo_descanso = ahora
-                                break
+                            except: break
             
             # MONITOR
-            if len(ops) > 0:
-                mon = f" | {ops[0]['s']}: {roi_vis:.2f}% | Piso: {piso_vis}%"
-            else:
-                restante = max(0, int(15 - (ahora - tiempo_descanso)))
-                mon = f" | ⏱️ ESPERA: {restante}s" if restante > 0 else f" | 🔎 BUSCANDO..."
+            if len(ops) > 0: mon = f" | {ops[0]['s']}: {roi_vis:.2f}%"
+            else: mon = f" | 🔒 CERROJO: {max(0, int(15-(ahora-tiempo_descanso)))}s" if bloqueo_activo else " | 🔎 BUSCANDO..."
             print(f"💰 Cap: ${saldo_actual:.2f}{mon}", end='\r')
-            
         except: time.sleep(1)
         time.sleep(1)
 
