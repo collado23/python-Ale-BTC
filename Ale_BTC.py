@@ -34,7 +34,7 @@ def bot():
             return 0.0
         except: return -1.0
 
-    print(f"🐊 MOTOR V146 | COMPRA OPTIMIZADA | ESPERA 15s")
+    print(f"🐊 MOTOR V146.2 | MARGEN DINÁMICO | STOP LOSS -2.5%")
 
     while True:
         ahora = time.time()
@@ -53,6 +53,7 @@ def bot():
                 ganancia_usdc = o['inv'] * (roi / 100)
                 roi_vis, gan_vis, piso_vis = roi, ganancia_usdc, o['piso']
                 
+                # 🔥 EL SALTO AL 1.5%
                 if roi >= 1.5 and not o['be']: 
                     o['x'] = 15
                     o['be'] = True 
@@ -60,6 +61,7 @@ def bot():
                     print(f"\n🚀 ¡SALTO 15X! {o['s']} | ROI: {roi:.2f}%")
 
                 if o['be']:
+                    # 🛡️ ESCALADOR
                     n_p = o['piso']
                     if roi >= 25.0:   n_p = 24.5
                     elif roi >= 20.0: n_p = 19.5
@@ -78,21 +80,18 @@ def bot():
                     if roi < o['piso']:
                         side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                         c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                        ultima_moneda = o['s']
-                        tiempo_descanso = ahora 
-                        ops.remove(o)
-                        print(f"\n✅ CIERRE: {o['s']} | Esperando 15s...")
+                        ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o)
+                        print(f"\n✅ CIERRE: {o['s']} | ROI: {roi:.2f}%")
                         continue
 
+                # ⚠️ STOP LOSS -2.5% REAL
                 if not o['be'] and roi <= -2.5:
                     side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    ultima_moneda = o['s']
-                    tiempo_descanso = ahora 
-                    ops.remove(o)
-                    print(f"\n⚠️ STOP LOSS: {o['s']} | Esperando 15s...")
+                    ultima_moneda = o['s']; tiempo_descanso = ahora; ops.remove(o)
+                    print(f"\n⚠️ STOP LOSS: {o['s']} | ROI: {roi:.2f}%")
 
-            # --- 🎯 BUSCADOR OPTIMIZADO ---
+            # --- 🎯 BUSCADOR CON MARGEN INTELIGENTE ---
             if len(ops) == 0 and (ahora - tiempo_descanso) > 15:
                 if not tiene_posicion_abierta():
                     for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
@@ -108,19 +107,22 @@ def bot():
                             side_e = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
                             
                             try:
-                                # 1. Cambiamos palanca primero
+                                # Usamos el 90% del saldo real para evitar el error de margen
+                                saldo_disponible = obtener_saldo_futuros()
+                                inversion = saldo_disponible * 0.90 
+                                
                                 c.futures_change_leverage(symbol=m, leverage=5)
-                                time.sleep(1) # <--- Silencio de 1s para que Binance procese
+                                time.sleep(1) 
                                 
-                                # 2. Recién ahora calculamos cantidad y compramos
                                 p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                                cant = round((9.80 * 5) / p_act, 1) # Usamos 9.80 para asegurar margen
+                                # Cálculo de cantidad con el 90% del capital
+                                cant = round((inversion * 5) / p_act, 1) 
                                 
-                                c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
-                                
-                                ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':9.80,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 COMPRA EXITOSA: {tipo} en {m} a {p_act}")
-                                break
+                                if cant > 0:
+                                    c.futures_create_order(symbol=m, side=side_e, type=ORDER_TYPE_MARKET, quantity=cant)
+                                    ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'inv':inversion,'x':5,'be':False, 'piso': -2.5})
+                                    print(f"\n🎯 COMPRA EXITOSA: {tipo} en {m} con ${inversion:.2f}")
+                                    break
                             except Exception as e:
                                 print(f"\n❌ REBOTE: {e}")
                                 tiempo_descanso = ahora
