@@ -14,7 +14,7 @@ def s_h():
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # Variables de Railway
+    # --- 🔑 CARGA DE VARIABLES DE ENTORNO (RAILWAY) ---
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
@@ -30,12 +30,12 @@ def bot():
         except: return 0.0
 
     cap = obtener_saldo_real()
-    print(f"🎯 V143 | STOP -2.5 | SALTO 2.0 | SALDO: ${cap:.2f}")
+    print(f"🎯 V143 CONECTADO | STOP -2.5 | SALTO 2.0 | SALDO REAL: ${cap:.2f}")
 
     while True:
         t_l = time.time()
         try:
-            # 🔄 RECUPERADOR DINÁMICO
+            # 🔄 RECUPERADOR (Evita duplicar si el bot se reinicia)
             if not ops:
                 posiciones = c.futures_position_information()
                 for p in posiciones:
@@ -45,30 +45,29 @@ def bot():
                         lado = 'LONG' if amt > 0 else 'SHORT'
                         precio_entrada = float(p['entryPrice'])
                         palanca = int(p['leverage'])
-                        # Reengancha con el nuevo stop loss de -2.5
                         ops.append({
                             's': simbolo, 'l': lado, 'p': precio_entrada, 
                             'q': abs(amt), 'x': palanca, 
                             'be': True if palanca >= 15 else False, 
                             'piso': 1.5 if palanca >= 15 else -2.5
                         })
-                        print(f"\n🔗 POSICIÓN RECUPERADA: {simbolo}")
+                        print(f"\n🔗 REENGANCHADO EN: {simbolo}")
                         break
 
-            # 1. GESTIÓN DE OPERACIÓN
+            # 1. GESTIÓN DE RIESGO Y ESCALADOR
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
-                # ROI NETO (0.9 de comisión)
+                # ROI NETO (Comisión 0.9)
                 roi_bruto = diff * 100 * o['x']
                 roi_n = roi_bruto - 0.9
                 
-                # 🔥 SALTO A 15X (Ajustado a 2.0% NETO)
+                # 🔥 SALTO A 15X (A los 2.0% NETO como pediste)
                 if roi_n >= 2.0 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'], o['be'], o['piso'] = 15, True, 1.5 # Piso inicial tras salto
+                        o['x'], o['be'], o['piso'] = 15, True, 1.5
                         print(f"\n🔥 SALTO 15X REALIZADO EN {o['s']}")
                     except: o['be'] = True
 
@@ -101,6 +100,7 @@ def bot():
                     if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
                         tipo = 'LONG' if cl > op_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
+                        # Usa el 80% del saldo real con palanca 5
                         cant = round(((cap * 0.80) * 5) / p_act, 1)
                         
                         if cant > 0:
@@ -109,16 +109,16 @@ def bot():
                                 side_orden = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
                                 c.futures_create_order(symbol=m, side=side_orden, type=ORDER_TYPE_MARKET, quantity=cant)
                                 ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 DISPARO {tipo}: {m}")
+                                print(f"\n🎯 DISPARO {tipo}: {m} | ROI NETO INICIA -0.90")
                                 break
                             except: pass
 
-            # MONITOR
+            # MONITOR DE CONSOLA
             if ops:
                 print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
             else:
                 if int(time.time()) % 60 == 0: cap = obtener_saldo_real()
-                print(f"💰 ${cap:.2f} | Buscando... | {time.strftime('%H:%M:%S')}   ", end='\r')
+                print(f"💰 ${cap:.2f} | Acechando entrada... | {time.strftime('%H:%M:%S')}   ", end='\r')
             
         except Exception as e:
             time.sleep(5)
