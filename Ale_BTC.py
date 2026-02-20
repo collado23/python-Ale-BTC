@@ -1,7 +1,7 @@
 import os, time, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
-from binance.enums import *
+from binance.enums import * 
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
