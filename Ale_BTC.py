@@ -3,7 +3,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 EL SERVIDOR QUE MANTIENE VIVO A RAILWAY ---
+# --- 🌐 EL SERVIDOR QUE MANTIENE VIVO A RAILWAY --- 
 class HealthServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
