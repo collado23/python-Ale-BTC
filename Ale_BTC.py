@@ -8,7 +8,7 @@ class H(BaseHTTPRequestHandler):
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
-
+ 
 # --- 🚀 2. MOTOR V143 FRANCOTIRADOR ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
