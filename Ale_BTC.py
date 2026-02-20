@@ -9,7 +9,7 @@ def bot():
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
     
-    lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",")
+    lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",") 
     p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
     sl_val = float(os.getenv("STOP_LOSS", -2.5))
     
