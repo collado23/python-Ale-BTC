@@ -98,9 +98,9 @@ def bot():
                     cap = obtener_saldo_real()
                     ops.remove(o)
 
-            # 2. ENTRADA (SOL, XRP, BNB, PEPE, DOGE)
+            # 2. ENTRADA (SOL, XRP, BNB, )
             if not ops:
-                for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC', 'PEPEUSDC', 'DOGEUSDC']:
+                for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC', ]:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
                     cl, op_v = float(k[-2][4]), float(k[-2][1]) 
                     k_full = [float(x[4]) for x in k]
