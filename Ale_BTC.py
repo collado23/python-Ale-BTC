@@ -3,7 +3,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 from binance.enums import *
 
-# --- SERVER DE SALUD PARA RAILWAY ---
+# --- SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
@@ -12,71 +12,75 @@ def s_h():
 
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     
     lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",")
     p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
     sl_val = float(os.getenv("STOP_LOSS", -2.5))
     
-    ops = []
-    bloqueadas = {}
+    op = None  # Solo una operación a la vez
+    bloqueada_hasta = 0
     u_p = 0
-    print("🐊 MOTOR V146 | PARCHE LEVERAGE APLICADO")
+    
+    print("🐊 MOTOR V146.1 | MODO OPERACIÓN ÚNICA ACTIVADO")
 
     while True:
         try:
             ahora = time.time()
 
-            # 1. RECUPERADOR (CON PARCHE PARA 'leverage')
-            if not ops:
+            # 1. SI NO HAY OP EN MEMORIA, BUSCA EN BINANCE SI HAY UNA ABIERTA
+            if op is None:
                 pos = c.futures_position_information()
                 for p in pos:
                     amt = float(p['positionAmt'])
                     if amt != 0:
-                        # Si no encuentra 'leverage', usa 5 por defecto para no romperse
-                        lev = int(p.get('leverage', 5)) 
-                        ops.append({
+                        lev = int(p.get('leverage', 5))
+                        op = {
                             's': p['symbol'], 'l': "LONG" if amt > 0 else "SHORT", 
                             'p': float(p['entryPrice']), 'q': abs(amt), 
                             'x': lev, 'be': False, 'piso': sl_val
-                        })
-                        print(f"✅ ENGANCHADO: {p['symbol']} a {lev}x")
+                        }
+                        print(f"✅ ENGANCHADO A {p['symbol']}")
+                        break
 
-            # 2. GESTIÓN + SALTO 15X REAL + ESCALADOR LARGO
-            for o in ops[:]:
-                p_act = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
-                diff = (p_act - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_act) / o['p']
-                roi = (diff * 100 * o['x']) - 0.85
+            # 2. SI HAY UNA OPERACIÓN, LA GESTIONA (SALTO + ESCALADOR)
+            if op:
+                p_act = float(c.futures_symbol_ticker(symbol=op['s'])['price'])
+                diff = (p_act - op['p']) / op['p'] if op['l'] == "LONG" else (op['p'] - p_act) / op['p']
+                roi = (diff * 100 * op['x']) - 0.85
                 
-                if roi >= 1.5 and not o['be']: 
+                # SALTO REAL A 15X
+                if roi >= 1.5 and not op['be']:
                     try:
-                        c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'], o['be'], o['piso'] = 15, True, 1.0
-                        print(f"🚀 SALTO 15X REALIZADO")
-                    except: o['be'] = True
+                        c.futures_change_leverage(symbol=op['s'], leverage=15)
+                        op['x'], op['be'], op['piso'] = 15, True, 1.0
+                        print(f"🚀 SALTO 15X REALIZADO EN {op['s']}")
+                    except: op['be'] = True
 
-                if o['be']:
-                    n_p = o['piso']
+                # ESCALADOR LARGO
+                if op['be']:
                     if roi >= 30.0: n_p = 28.5
                     elif roi >= 20.0: n_p = 18.5
                     elif roi >= 10.0: n_p = 8.5
                     elif roi >= 5.0: n_p = 4.0
                     elif roi >= 2.0: n_p = 1.5
-                    if n_p > o['piso']: o['piso'] = n_p
+                    else: n_p = op['piso']
+                    if n_p > op['piso']: op['piso'] = n_p
 
-                if roi < (o['piso'] if o['be'] else sl_val):
-                    side = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
-                    c.futures_create_order(symbol=o['s'], side=side, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                # CIERRE
+                check = op['piso'] if op['be'] else sl_val
+                if roi < check:
+                    side = SIDE_SELL if op['l'] == "LONG" else SIDE_BUY
+                    c.futures_create_order(symbol=op['s'], side=side, type=ORDER_TYPE_MARKET, quantity=op['q'])
                     print(f"💰 CIERRE: {roi:.2f}%")
-                    bloqueadas[o['s']] = ahora + 60 # Descanso 1 min
-                    ops.remove(o)
+                    bloqueada_hasta = ahora + 60 # Descansa 1 minuto
+                    op = None # Libera para buscar otra
 
-            # 3. BUSCADOR ORIGINAL
-            if not ops:
+            # 3. SI NO HAY NADA ABIERTO Y PASÓ EL DESCANSO, BUSCA NUEVA
+            elif ahora > bloqueada_hasta:
                 for m in lista_m:
-                    if m in bloqueadas and ahora < bloqueadas[m]: continue
                     k = c.futures_klines(symbol=m, interval='1m', limit=5)
-                    if float(k[-1][4]) > float(k[-1][1]):
+                    if float(k[-1][4]) > float(k[-1][1]): # Vela verde
                         bal = c.futures_account_balance()
                         saldo = float(next(b for b in bal if b['asset'] == 'USDC')['balance'])
                         c.futures_change_leverage(symbol=m, leverage=5)
@@ -85,14 +89,13 @@ def bot():
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=cant)
                             print(f"🎯 ENTRADA NUEVA: {m}")
-                            break
+                            break # Solo una a la vez
 
             if ahora - u_p > 15:
-                print("🔎 BUSCANDO O GESTIONANDO..." if not ops else f"📊 ROI: {roi:.2f}%")
+                print("🔎 BUSCANDO..." if op is None else f"📊 {op['s']}: {roi:.2f}%")
                 u_p = ahora
 
         except Exception as e:
-            print(f"⚠️ Reintentando... ({e})")
             time.sleep(5)
         time.sleep(1)
 
