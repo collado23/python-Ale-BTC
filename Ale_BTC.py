@@ -7,7 +7,8 @@ from binance.enums import *
 class H(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
-        self.wfile.write(b"Bot V143 Activo") 
+        self.wfile.write(b"Bot V143 Online") 
+
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
@@ -16,7 +17,7 @@ def s_h():
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # 🔑 CONEXIÓN A LAS VARIABLES DE BINANCE EN RAILWAY
+    # 🔑 VARIABLES DE ENTORNO
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
@@ -32,25 +33,50 @@ def bot():
         except: return 0.0
 
     cap = obtener_saldo_real()
-    print(f"🎯 V143 CONECTADO | SALDO: ${cap:.2f} | STOP -2.5 | SALTO 2.0")
+    print(f"🎯 V143 ACTIVADO | SALDO: ${cap:.2f}")
 
     while True:
         t_l = time.time()
         try:
-            # 1. GESTIÓN DE OPERACIÓN
+            # 🔄 RECUPERADOR AGRESIVO (Revisa Binance SIEMPRE si la lista está vacía)
+            if not ops:
+                todas_las_posiciones = c.futures_position_information()
+                for p in todas_las_posiciones:
+                    cantidad = float(p['positionAmt'])
+                    # Si la cantidad no es 0, hay una operación real abierta en Binance
+                    if cantidad != 0:
+                        simbolo = p['symbol']
+                        lado = 'LONG' if cantidad > 0 else 'SHORT'
+                        precio_e = float(p['entryPrice'])
+                        apalancamiento = int(p['leverage'])
+                        
+                        # Enganchamos la operación a la memoria del bot
+                        ops.append({
+                            's': simbolo, 
+                            'l': lado, 
+                            'p': precio_e, 
+                            'q': abs(cantidad), 
+                            'x': apalancamiento, 
+                            'be': True if apalancamiento >= 15 else False, 
+                            'piso': 1.5 if apalancamiento >= 15 else -2.5
+                        })
+                        print(f"\n✅ OPERACIÓN RECUPERADA: {simbolo} ({lado}) a {apalancamiento}x")
+                        break # Salimos del for para gestionar esta operación encontrada
+
+            # 1. GESTIÓN DE LA OPERACIÓN (ROI NETO 0.9)
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
-                # ROI NETO (Arranca en -0.9)
+                # ROI NETO (Ajustado con tu 0.9 de comisión)
                 roi_n = (diff * 100 * o['x']) - 0.9 
                 
-                # 🔥 SALTO A 15X (Cuando llega a 2.0% NETO)
-                if roi_n >= 2.0 and o['x'] == 5: 
+                # 🔥 SALTO A 15X (A los 2.0% NETO)
+                if roi_n >= 2.0 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 1.5
-                        print(f"\n🔥 SALTO 15X REALIZADO EN {o['s']}")
+                        print(f"\n🔥 SALTO REALIZADO EN {o['s']}")
                     except: o['be'] = True
 
                 # 🪜 ESCALADOR +0.5
@@ -58,21 +84,22 @@ def bot():
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # 📉 CIERRE (Stop -2.5% o Piso)
+                # 📉 CIERRE (Stop -2.5% o Piso dinámico)
                 check_cierre = o['piso'] if o['be'] else -2.5
                 if roi_n >= 3.5 or roi_n <= check_cierre:
                     side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     try:
                         c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                        print(f"\n✅ CIERRE EN {o['s']} | NETO: {roi_n:.2f}%")
-                    except: pass
+                        print(f"\n✅ CIERRE EJECUTADO EN {o['s']} | ROI FINAL: {roi_n:.2f}%")
+                    except Exception as e:
+                        print(f"\n❌ Error al cerrar: {e}")
                     
                     time.sleep(2)
                     cap = obtener_saldo_real()
                     ops.remove(o)
 
-            # 2. ENTRADA (SOL, XRP, BNB)
-            if len(ops) < 1:
+            # 2. BÚSQUEDA DE ENTRADA (Solo si no hay nada abierto en Binance)
+            if not ops:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
                     cl, op_v = float(k[-2][4]), float(k[-2][1]) 
@@ -83,7 +110,7 @@ def bot():
                         tipo = 'LONG' if cl > op_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                         
-                        # Calculamos cantidad con el 90% del saldo real
+                        # Calculamos cantidad usando el 90% del saldo real
                         cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
@@ -92,19 +119,20 @@ def bot():
                                 side_orden = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
                                 c.futures_create_order(symbol=m, side=side_orden, type=ORDER_TYPE_MARKET, quantity=cant)
                                 ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 DISPARO {tipo}: {m} | ROI NETO INICIA -0.90")
+                                print(f"\n🎯 DISPARO ENTRADA: {m} ({tipo})")
                                 break
-                            except Exception as e:
-                                print(f"Error entrada: {e}")
+                            except: pass
 
             # MONITOR
             if ops:
                 print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
             else:
                 if int(time.time()) % 60 == 0: cap = obtener_saldo_real()
-                print(f"💰 ${cap:.2f} | Acechando... | {time.strftime('%H:%M:%S')}   ", end='\r')
+                print(f"💰 ${cap:.2f} | Buscando señal... | {time.strftime('%H:%M:%S')}   ", end='\r')
             
-        except: time.sleep(5)
+        except Exception as e:
+            time.sleep(5)
+        
         time.sleep(max(1, 10 - (time.time() - t_l)))
 
 if __name__ == "__main__": 
