@@ -13,81 +13,88 @@ def s_h():
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # 🔗 VINCULACIÓN CON TUS VARIABLES
+    # 🔗 CONEXIÓN
     c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
+    
+    # ⚙️ VARIABLES (Directo de tus variables de Railway)
+    lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",")
+    p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
     sl_val = float(os.getenv("STOP_LOSS", -2.5))
     
     ops = []
     u_p = 0
-    print("🐊 MOTOR V150.9 | MODO RADAR ACTIVADO")
+    print("🐊 MOTOR V151 | ARRANCANDO LABURO")
 
     while True:
         try:
             ahora = time.time()
-            
-            # 🔄 RADAR DE POSICIONES (ESCANEO TOTAL)
+
+            # 🔄 1. RECUPERADOR (PESCA LO QUE ESTÉ ABIERTO)
             if len(ops) == 0:
-                # Forzamos la actualización de cuenta
-                acc = c.futures_account()
-                posiciones = acc['positions']
-                for p in posiciones:
+                pos = c.futures_position_information()
+                for p in pos:
                     amt = float(p['positionAmt'])
                     if amt != 0:
-                        symbol = p['symbol']
                         ops.append({
-                            's': symbol, 
-                            'l': "LONG" if amt > 0 else "SHORT", 
-                            'p': float(p['entryPrice']), 
-                            'q': abs(amt), 
-                            'x': int(p['leverage']), 
-                            'be': False, 
-                            'piso': sl_val
+                            's': p['symbol'], 'l': "LONG" if amt > 0 else "SHORT", 
+                            'p': float(p['entryPrice']), 'q': abs(amt), 
+                            'x': 5, 'be': False, 'piso': sl_val
                         })
-                        print(f"🎯 RADAR: Posición enganchada en {symbol}")
+                        print(f"✅ ENGANCHADO: {p['symbol']}")
 
-            # 📊 GESTIÓN CON EL ESCALADOR QUE QUERÉS
+            # 📊 2. GESTIÓN CON EL ESCALADOR LARGO
             for o in ops[:]:
-                ticker = c.futures_symbol_ticker(symbol=o['s'])
-                p_act = float(ticker['price'])
-                
-                # ROI real con apalancamiento
+                p_act = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_act - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_act) / o['p']
-                roi = (diff * 100 * o['x']) - 0.8 # Descuento de comisión
+                roi = (diff * 100 * o['x']) - 0.9
                 
-                # Lógica 15x
+                # SALTO A 15X
                 if roi >= 1.5 and not o['be']: 
-                    o['x'] = 15; o['be'] = True; o['piso'] = 0.8
-                    print(f"🚀 SALTO 15X EN {o['s']}")
+                    o['x'] = 15; o['be'] = True; o['piso'] = 1.0; print("🚀 POTENCIA 15X")
 
-                # 🛡️ TU ESCALADOR LARGO (CORREGIDO)
+                # ESCALADOR LARGO
                 if o['be']:
                     n_p = o['piso']
                     if roi >= 30.0: n_p = 28.5
                     elif roi >= 20.0: n_p = 18.5
                     elif roi >= 10.0: n_p = 8.5
                     elif roi >= 5.0: n_p = 4.0
-                    elif roi >= 2.5: n_p = 1.8
+                    elif roi >= 2.0: n_p = 1.5
                     if n_p > o['piso']: o['piso'] = n_p
 
-                # Cierre por Stop o Piso
-                umbral = o['piso'] if o['be'] else sl_val
-                if roi < umbral:
+                # CIERRE
+                check = o['piso'] if o['be'] else sl_val
+                if roi < check:
                     side = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    ops.remove(o)
-                    print(f"💰 CIERRE: {o['s']} | ROI: {roi:.2f}%")
+                    ops.remove(o); print(f"💰 CIERRE: {roi:.2f}%")
 
-            # 💰 MONITOR DE SALDO (USDC / USDT)
+            # 🎯 3. BUSCADOR (Si no hay nada enganchado)
+            if len(ops) == 0:
+                for m in lista_m:
+                    k = c.futures_klines(symbol=m, interval='1m', limit=30)
+                    cl = [float(x[4]) for x in k]
+                    if (cl[-2] > float(k[-2][1])): # Lógica simple para que arranque
+                        tipo = 'LONG'
+                        bal = c.futures_account_balance()
+                        inv = float(next(b for b in bal if b['asset'] == 'USDC')['balance']) * p_inv
+                        c.futures_change_leverage(symbol=m, leverage=5)
+                        p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
+                        cant = round((inv * 5) / p_act, 1)
+                        if cant > 0:
+                            c.futures_create_order(symbol=m, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"🎯 NUEVA: {m}")
+                            break
+
+            # MONITOR
             if ahora - u_p > 10:
                 bal = c.futures_account_balance()
-                saldo = sum(float(b['balance']) for b in bal if b['asset'] in ['USDC', 'USDT'])
-                msg = f"{ops[0]['s']}: {roi:.2f}%" if len(ops) > 0 else "🔎 ESCANEANDO..."
-                print(f"💰 Saldo: ${saldo:.2f} | {msg}")
+                saldo = float(next(b for b in bal if b['asset'] == 'USDC')['balance'])
+                res = f"{ops[0]['s']}: {roi:.2f}%" if len(ops) > 0 else "🔎 BUSCANDO..."
+                print(f"💰 Cap: ${saldo:.2f} | {res}")
                 u_p = ahora
 
-        except Exception as e:
-            time.sleep(4)
+        except: time.sleep(5)
         time.sleep(1)
 
-if __name__ == "__main__":
-    bot()
+if __name__ == "__main__": bot()
