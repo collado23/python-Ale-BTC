@@ -1,20 +1,24 @@
 import os, time, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
-from binance.enums import * 
+from binance.enums import *
 
 # --- 🌐 1. SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): 
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK") 
+
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
-# --- 🚀 2. MOTOR V143 REFORZADO ---
+# --- 🚀 2. MOTOR V143 ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # --- 🔑 CARGA DE VARIABLES DE ENTORNO (RAILWAY) ---
+    # --- 🔑 VARIABLES DE ENTORNO ---
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
@@ -30,12 +34,12 @@ def bot():
         except: return 0.0
 
     cap = obtener_saldo_real()
-    print(f"🎯 V143 CONECTADO | STOP -2.5 | SALTO 2.0 | SALDO REAL: ${cap:.2f}")
+    print(f"🎯 V143 CONECTADO | SALDO: ${cap:.2f} | STOP -2.5 | SALTO 2.0")
 
     while True:
         t_l = time.time()
         try:
-            # 🔄 RECUPERADOR (Evita duplicar si el bot se reinicia)
+            # 🔄 RECUPERADOR
             if not ops:
                 posiciones = c.futures_position_information()
                 for p in posiciones:
@@ -54,21 +58,20 @@ def bot():
                         print(f"\n🔗 REENGANCHADO EN: {simbolo}")
                         break
 
-            # 1. GESTIÓN DE RIESGO Y ESCALADOR
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 
                 # ROI NETO (Comisión 0.9)
                 roi_bruto = diff * 100 * o['x']
-                roi_n = roi_bruto - 0.9
+                roi_n = roi_bruto - 0.9 
                 
-                # 🔥 SALTO A 15X (A los 2.0% NETO como pediste)
+                # 🔥 SALTO A 15X (ROI 2.0% NETO)
                 if roi_n >= 2.0 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 1.5
-                        print(f"\n🔥 SALTO 15X REALIZADO EN {o['s']}")
+                        print(f"\n🔥 SALTO 15X EN {o['s']}")
                     except: o['be'] = True
 
                 # 🪜 ESCALADOR +0.5
@@ -76,7 +79,7 @@ def bot():
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # 📉 CIERRE (Profit 3.5%, Stop -2.5% o Piso)
+                # 📉 CIERRE (Stop -2.5% o Piso dinámico)
                 check_cierre = o['piso'] if o['be'] else -2.5
                 if roi_n >= 3.5 or roi_n <= check_cierre:
                     side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
@@ -89,7 +92,7 @@ def bot():
                     cap = obtener_saldo_real()
                     ops.remove(o)
 
-            # 2. ENTRADA (E9/E27 SIN BTC)
+            # 🎯 ENTRADA SIN BTC
             if not ops:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC', 'PEPEUSDC', 'DOGEUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
@@ -100,29 +103,20 @@ def bot():
                     if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
                         tipo = 'LONG' if cl > op_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        # Usa el 80% del saldo real con palanca 5
-                        cant = round(((cap * 0.80) * 5) / p_act, 1)
-                        
+                        # Ajuste margen 90%
+                        cant = round(((cap * 0.90) * 5) / p_act, 1)
                         if cant > 0:
                             try:
                                 c.futures_change_leverage(symbol=m, leverage=5)
-                                side_orden = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
-                                c.futures_create_order(symbol=m, side=side_orden, type=ORDER_TYPE_MARKET, quantity=cant)
+                                c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
                                 ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 DISPARO {tipo}: {m} | ROI NETO INICIA -0.90")
                                 break
                             except: pass
 
-            # MONITOR DE CONSOLA
-            if ops:
-                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
-            else:
-                if int(time.time()) % 60 == 0: cap = obtener_saldo_real()
-                print(f"💰 ${cap:.2f} | Acechando entrada... | {time.strftime('%H:%M:%S')}   ", end='\r')
+            status = f"ROI: {roi_n:.2f}%" if ops else "Acechando..."
+            print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
             
-        except Exception as e:
-            time.sleep(5)
-        
+        except: time.sleep(5)
         time.sleep(max(1, 10 - (time.time() - t_l)))
 
 if __name__ == "__main__": 
