@@ -41,8 +41,8 @@ def bot():
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 roi_n = (diff * 100 * o['x']) - 0.9 
                 
-                # 🔥 SALTO A 15X (ROI 2.5% NETO)
-                if roi_n >= 2.5 and o['x'] == 5: 
+                # 🔥 SALTO A 15X (ROI 2.% NETO)
+                if roi_n >= 2. and o['x'] == 5: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 2.0
@@ -55,7 +55,7 @@ def bot():
                     if nuevo_piso > o['piso']:
                         o['piso'] = nuevo_piso
 
-                # 📉 CIERRES REALES (Stop -1.6 o Piso dinámico)
+                # 📉 CIERRES REALES (Stop -2.5 o Piso dinámico)
                 check_cierre = o['piso'] if o['be'] else -1.6
                 if roi_n >= 10.0 or roi_n <= check_cierre:
                     side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
