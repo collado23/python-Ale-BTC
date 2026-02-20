@@ -12,7 +12,7 @@ def s_h():
 
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
     
     lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",")
     p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
