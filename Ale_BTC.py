@@ -18,17 +18,17 @@ def bot():
     p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
     sl_val = float(os.getenv("STOP_LOSS", -2.5))
     
-    op = None  # Solo una operación a la vez
+    op = None
     bloqueada_hasta = 0
     u_p = 0
     
-    print("🐊 MOTOR V146.1 | MODO OPERACIÓN ÚNICA ACTIVADO")
+    print("🐊 MOTOR V146.2 | COMISIÓN CORREGIDA | 15X REAL")
 
     while True:
         try:
             ahora = time.time()
 
-            # 1. SI NO HAY OP EN MEMORIA, BUSCA EN BINANCE SI HAY UNA ABIERTA
+            # 1. RECUPERADOR
             if op is None:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -43,28 +43,30 @@ def bot():
                         print(f"✅ ENGANCHADO A {p['symbol']}")
                         break
 
-            # 2. SI HAY UNA OPERACIÓN, LA GESTIONA (SALTO + ESCALADOR)
+            # 2. GESTIÓN (SIN EL DESCUENTO AGRESIVO DE 0.9)
             if op:
                 p_act = float(c.futures_symbol_ticker(symbol=op['s'])['price'])
                 diff = (p_act - op['p']) / op['p'] if op['l'] == "LONG" else (op['p'] - p_act) / op['p']
-                roi = (diff * 100 * op['x']) - 0.85
+                
+                # ROI real (solo descontamos un mínimo de 0.1 por el spread)
+                roi = (diff * 100 * op['x']) - 0.10
                 
                 # SALTO REAL A 15X
                 if roi >= 1.5 and not op['be']:
                     try:
                         c.futures_change_leverage(symbol=op['s'], leverage=15)
-                        op['x'], op['be'], op['piso'] = 15, True, 1.0
+                        op['x'], op['be'], op['piso'] = 15, True, 0.5 # Piso inicial en 0.5%
                         print(f"🚀 SALTO 15X REALIZADO EN {op['s']}")
                     except: op['be'] = True
 
-                # ESCALADOR LARGO
+                # ESCALADOR LARGO (AJUSTADO)
                 if op['be']:
+                    n_p = op['piso']
                     if roi >= 30.0: n_p = 28.5
                     elif roi >= 20.0: n_p = 18.5
                     elif roi >= 10.0: n_p = 8.5
                     elif roi >= 5.0: n_p = 4.0
-                    elif roi >= 2.0: n_p = 1.5
-                    else: n_p = op['piso']
+                    elif roi >= 2.0: n_p = 1.0
                     if n_p > op['piso']: op['piso'] = n_p
 
                 # CIERRE
@@ -74,13 +76,13 @@ def bot():
                     c.futures_create_order(symbol=op['s'], side=side, type=ORDER_TYPE_MARKET, quantity=op['q'])
                     print(f"💰 CIERRE: {roi:.2f}%")
                     bloqueada_hasta = ahora + 60 # Descansa 1 minuto
-                    op = None # Libera para buscar otra
+                    op = None
 
-            # 3. SI NO HAY NADA ABIERTO Y PASÓ EL DESCANSO, BUSCA NUEVA
+            # 3. BUSCADOR
             elif ahora > bloqueada_hasta:
                 for m in lista_m:
                     k = c.futures_klines(symbol=m, interval='1m', limit=5)
-                    if float(k[-1][4]) > float(k[-1][1]): # Vela verde
+                    if float(k[-1][4]) > float(k[-1][1]): 
                         bal = c.futures_account_balance()
                         saldo = float(next(b for b in bal if b['asset'] == 'USDC')['balance'])
                         c.futures_change_leverage(symbol=m, leverage=5)
@@ -89,10 +91,10 @@ def bot():
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=cant)
                             print(f"🎯 ENTRADA NUEVA: {m}")
-                            break # Solo una a la vez
+                            break
 
-            if ahora - u_p > 15:
-                print("🔎 BUSCANDO..." if op is None else f"📊 {op['s']}: {roi:.2f}%")
+            if ahora - u_p > 10:
+                print("🔎..." if op is None else f"📊 {op['s']}: {roi:.2f}% (Piso: {op['piso']}%)")
                 u_p = ahora
 
         except Exception as e:
