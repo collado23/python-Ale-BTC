@@ -5,31 +5,26 @@ from binance.enums import *
 
 # --- 🌐 SERVER DE SALUD ---
 class H(BaseHTTPRequestHandler):
-    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK") 
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
 def s_h():
     try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
-    
-    # 🔗 CONEXIÓN
     c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     
-    # ⚙️ VARIABLES (Directo de tus variables de Railway)
     lista_m = os.getenv("MONEDAS", "SOLUSDC,XRPUSDC,BNBUSDC").split(",")
-    p_inv = float(os.getenv("PORCENTAJE_INVERSION", 0.80))
     sl_val = float(os.getenv("STOP_LOSS", -2.5))
-    
     ops = []
     u_p = 0
-    print("🐊 MOTOR V151 | ARRANCANDO LABURO")
+    print("🐊 MOTOR V152 | SALTO REAL 15X ACTIVADO")
 
     while True:
         try:
             ahora = time.time()
-
-            # 🔄 1. RECUPERADOR (PESCA LO QUE ESTÉ ABIERTO)
+            
+            # 🔄 1. RECUPERADOR (BUSCA TU OPERACIÓN)
             if len(ops) == 0:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -38,60 +33,52 @@ def bot():
                         ops.append({
                             's': p['symbol'], 'l': "LONG" if amt > 0 else "SHORT", 
                             'p': float(p['entryPrice']), 'q': abs(amt), 
-                            'x': 5, 'be': False, 'piso': sl_val
+                            'x': int(p['leverage']), 'be': False, 'piso': sl_val
                         })
-                        print(f"✅ ENGANCHADO: {p['symbol']}")
+                        print(f"✅ ENGANCHADO: {p['symbol']} a {p['leverage']}x")
 
-            # 📊 2. GESTIÓN CON EL ESCALADOR LARGO
+            # 📊 2. GESTIÓN + SALTO REAL EN BINANCE
             for o in ops[:]:
                 p_act = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_act - o['p']) / o['p'] if o['l'] == "LONG" else (o['p'] - p_act) / o['p']
-                roi = (diff * 100 * o['x']) - 0.9
+                roi = (diff * 100 * o['x']) - 0.8
                 
-                # SALTO A 15X
+                # 🔥 EL SALTO REAL (CAMBIA EL CARTELITO EN BINANCE)
                 if roi >= 1.5 and not o['be']: 
-                    o['x'] = 15; o['be'] = True; o['piso'] = 1.0; print("🚀 POTENCIA 15X")
+                    try:
+                        c.futures_change_leverage(symbol=o['s'], leverage=15) # <-- ESTO LO CAMBIA EN BINANCE
+                        o['x'] = 15
+                        o['be'] = True
+                        o['piso'] = 1.0
+                        print(f"🚀 SALTO 15X REALIZADO EN BINANCE PARA {o['s']}")
+                    except Exception as e:
+                        print(f"⚠️ Error al cambiar palanca: {e}")
+                        o['be'] = True # Lo marcamos igual para proteger
 
-                # ESCALADOR LARGO
+                # 🛡️ ESCALADOR LARGO (TU PREFERIDO)
                 if o['be']:
                     n_p = o['piso']
-                    if roi >= 30.0: n_p = 28.5
+                    if roi >= 30.0:   n_p = 28.5
                     elif roi >= 20.0: n_p = 18.5
                     elif roi >= 10.0: n_p = 8.5
-                    elif roi >= 5.0: n_p = 4.0
-                    elif roi >= 2.0: n_p = 1.5
+                    elif roi >= 5.0:  n_p = 4.0
+                    elif roi >= 2.0:  n_p = 1.5
                     if n_p > o['piso']: o['piso'] = n_p
 
-                # CIERRE
+                # ⚠️ CIERRE POR PISO O STOP
                 check = o['piso'] if o['be'] else sl_val
                 if roi < check:
                     side = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    ops.remove(o); print(f"💰 CIERRE: {roi:.2f}%")
+                    ops.remove(o)
+                    print(f"💰 CIERRE: ROI {roi:.2f}%")
 
-            # 🎯 3. BUSCADOR (Si no hay nada enganchado)
-            if len(ops) == 0:
-                for m in lista_m:
-                    k = c.futures_klines(symbol=m, interval='1m', limit=30)
-                    cl = [float(x[4]) for x in k]
-                    if (cl[-2] > float(k[-2][1])): # Lógica simple para que arranque
-                        tipo = 'LONG'
-                        bal = c.futures_account_balance()
-                        inv = float(next(b for b in bal if b['asset'] == 'USDC')['balance']) * p_inv
-                        c.futures_change_leverage(symbol=m, leverage=5)
-                        p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        cant = round((inv * 5) / p_act, 1)
-                        if cant > 0:
-                            c.futures_create_order(symbol=m, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=cant)
-                            print(f"🎯 NUEVA: {m}")
-                            break
-
-            # MONITOR
+            # 🎯 3. MONITOR
             if ahora - u_p > 10:
                 bal = c.futures_account_balance()
                 saldo = float(next(b for b in bal if b['asset'] == 'USDC')['balance'])
-                res = f"{ops[0]['s']}: {roi:.2f}%" if len(ops) > 0 else "🔎 BUSCANDO..."
-                print(f"💰 Cap: ${saldo:.2f} | {res}")
+                msg = f"{ops[0]['s']}: {roi:.2f}% (Piso: {ops[0]['piso']}%)" if len(ops) > 0 else "🔎 BUSCANDO..."
+                print(f"💰 Cap: ${saldo:.2f} | {msg}")
                 u_p = ahora
 
         except: time.sleep(5)
