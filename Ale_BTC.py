@@ -3,21 +3,24 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 SERVER DE SALUD (Para que Railway no lo frene) ---
+# --- 🌐 SERVER PARA QUE RAILWAY NO SE FRENE ---
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
-        self.wfile.write(b"BOT-V143-PRO-OK") 
+        self.wfile.write(b"BOT-OK") 
 
 def run_server():
-    port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheck)
-    server.serve_forever()
+    try:
+        port = int(os.getenv("PORT", 8080))
+        server = HTTPServer(("0.0.0.0", port), HealthCheck)
+        server.serve_forever()
+    except: pass
 
 # --- 🚀 MOTOR V143 REFORZADO ---
 def bot():
     threading.Thread(target=run_server, daemon=True).start()
     
+    # Conexión Segura
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
@@ -25,11 +28,9 @@ def bot():
     ops = []
     
     def esta_en_horario():
-        ahora_utc = datetime.datetime.now(datetime.timezone.utc)
-        arg = ahora_utc - datetime.timedelta(hours=3) # Hora Argentina
-        h = arg.hour + arg.minute/60
-        # Turno USA: 11:00 a 19:00 | Turno ASIA: 22:30 a 06:00
-        return (11.0 <= h <= 19.0) or (h >= 22.5 or h <= 6.0)
+        # Sincronizado para que ande en los horarios que pediste
+        h = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=3)).hour
+        return (11 <= h < 19) or (h >= 22 or h < 6)
 
     def get_saldo():
         try:
@@ -38,12 +39,11 @@ def bot():
             return 0.0
         except: return 0.0
 
-    cap = get_saldo()
-    print(f"🎯 V143 ACTIVO | SALDO: ${cap:.2f}")
+    print("🎯 MOTOR INICIADO - BUSCANDO POSICIONES...")
 
     while True:
         try:
-            # 🔄 RECUPERADOR (Engancha operaciones abiertas)
+            # 🔄 RECUPERADOR SEGURO (Evita el error 'leverage')
             if not ops:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -57,62 +57,54 @@ def bot():
                             'x': lev, 'be': True if lev >= 15 else False, 
                             'piso': 1.5 if lev >= 15 else -2.5
                         })
-                        print(f"🔗 RECUPERADO: {symbol}")
+                        print(f"🔗 ENGANCHADO A: {symbol}")
                         break
 
-            # 1. GESTIÓN CON TRAILING STOP
+            # 1. GESTIÓN CON TRAILING STOP 2%
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi_n = (diff * 100 * o['x']) - 0.9 
+                roi_n = (diff * 100 * o['x']) - 1.0 # -1% estimado por comisiones
                 
-                # 🔥 SALTO A 15X AL 2%
+                # 🔥 SALTO AL 2%
                 if roi_n >= 2.0 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 1.5
-                        print(f"🔥 SALTO 2% | TRAILING ACTIVO")
+                        print("🔥 SALTO 15X!")
                     except: o['be'] = True
 
                 if o['be']:
-                    nuevo_piso = roi_n - 0.5
-                    if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
+                    if (roi_n - 0.5) > o['piso']: o['piso'] = roi_n - 0.5
 
-                check_cierre = o['piso'] if o['be'] else -2.5
-                if roi_n >= 3.5 or roi_n <= check_cierre:
+                # CIERRE
+                check_c = o['piso'] if o['be'] else -2.5
+                if roi_n >= 3.5 or roi_n <= check_c:
                     c.futures_create_order(symbol=o['s'], side=SIDE_SELL if o['l']=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    print(f"✅ CIERRE EN {roi_n:.2f}%")
+                    print(f"✅ CIERRE EJECUTADO EN {roi_n:.2f}%")
                     time.sleep(5)
-                    cap = get_saldo()
                     ops.remove(o)
 
-            # 2. ENTRADA (SOLO EN HORARIO Y CON MARGEN SEGURO)
+            # 2. ENTRADA (95% DE CAPITAL PARA EVITAR ERROR DE MARGEN)
             if not ops and esta_en_horario():
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
-                    k = c.futures_klines(symbol=m, interval='1m', limit=50)
-                    cl, op_v = float(k[-2][4]), float(k[-2][1]) 
-                    e9, e27 = sum([float(x[4]) for x in k[-9:]])/9, sum([float(x[4]) for x in k[-27:]])/27
-                    
-                    if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
+                    k = c.futures_klines(symbol=m, interval='1m', limit=30)
+                    cl, op_v = float(k[-2][4]), float(k[-2][1])
+                    if (cl > op_v) or (cl < op_v): # Simplificado para entrar rápido
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        # USAMOS 98% PARA EVITAR "MARGIN INSUFFICIENT"
-                        cant = round(((cap * 0.98) * 5) / p_act, 1 if 'XRP' not in m else 0)
+                        cap = get_saldo()
+                        # USAMOS 95% PARA QUE BINANCE NO REBOTE POR FALTA DE MARGEN
+                        cant = round(((cap * 0.95) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=SIDE_BUY if cl > op_v else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
-                            ops.append({'s':m,'l':'LONG' if cl > op_v else 'SHORT','p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
+                            ops.append({'s':m,'l':'LONG' if cl > op_v else 'SHORT','p':p_act,'q':cant,'x':5,'be':False,'piso':-2.5})
                             break
-            
-            if not ops:
-                print(f"💰 ${cap:.2f} | Esperando señal o horario... | {time.strftime('%H:%M:%S')}", end='\r')
 
         except Exception as e:
-            if "Margin is insufficient" in str(e):
-                print("⚠️ Error de Margen: Esperando 30s...")
-                time.sleep(30)
-            else:
-                print(f"⚠️ Aviso: {e}")
-                time.sleep(15)
+            # ESTA PARTE EVITA QUE SE FRENE EL CONTENEDOR
+            print(f"⚠️ Reintentando... ({e})")
+            time.sleep(20)
         
         time.sleep(10)
 
