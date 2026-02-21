@@ -1,29 +1,27 @@
 import os, time, threading
-from http.server import BaseHTTPRequestHandler, HTTPServer   
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 1. SERVER DE SALUD (Para evitar el Stopping Container) ---
+# --- 🌐 1. SERVER PARA QUE RAILWAY NO SE DETENGA ---
 class H(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
-        self.wfile.write(b"Bot V143 Online") 
-
+        self.wfile.write(b"Bot V143 Activo") 
 def s_h():
-    puerto = int(os.getenv("PORT", 8080))
-    try: HTTPServer(("0.0.0.0", puerto), H).serve_forever()
+    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
     except: pass
 
-# --- 🚀 2. MOTOR V143 ---
+# --- 🚀 2. MOTOR V143 CON RECUPERADOR ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # 🔑 Variables desde Railway
+    # 🔑 CONEXIÓN A RAILWAY
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
     
-    ops = [] # Memoria del bot
+    ops = []
     
     def obtener_saldo_real():
         try:
@@ -34,38 +32,38 @@ def bot():
         except: return 0.0
 
     cap = obtener_saldo_real()
-    print(f"🎯 V143 | SALDO: ${cap:.2f} | STOP -2.5 | SALTO 2.0")
+    print(f"🎯 V143 | SALDO: ${cap:.2f} | SALTO: 2.5%")
 
     while True:
         t_l = time.time()
         try:
-            # 🔄 RECUPERADOR CRÍTICO: Mira Binance antes de hacer nada
+            # 🔄 RECUPERADOR (Evita el error de margen)
             if not ops:
                 pos = c.futures_position_information()
                 for p in pos:
                     amt = float(p['positionAmt'])
-                    if amt != 0: # ¡ENCONTRÓ LA OPERACIÓN!
+                    if amt != 0: # Detecta tu XRP de la captura
                         simbolo = p['symbol']
                         lado = 'LONG' if amt > 0 else 'SHORT'
                         ops.append({
                             's': simbolo, 'l': lado, 'p': float(p['entryPrice']), 
                             'q': abs(amt), 'x': int(p['leverage']), 
                             'be': True if int(p['leverage']) >= 15 else False, 
-                            'piso': 1.5 if int(p['leverage']) >= 15 else -2.5
+                            'piso': 2.0 if int(p['leverage']) >= 15 else -2.5
                         })
-                        print(f"\n🔗 REENGANCHADO A BINANCE: {simbolo}")
+                        print(f"\n🔗 OPERACIÓN ENCONTRADA: {simbolo}")
                         break
 
-            # 1. GESTIÓN (Si hay operación abierta o recuperada)
+            # 1. GESTIÓN
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
                 roi_n = (diff * 100 * o['x']) - 0.9 
                 
-                if roi_n >= 2.0 and o['x'] < 15: 
+                if roi_n >= 2.5 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'], o['be'], o['piso'] = 15, True, 1.5
+                        o['x'], o['be'], o['piso'] = 15, True, 2.0
                         print(f"\n🔥 SALTO 15X")
                     except: o['be'] = True
 
@@ -77,12 +75,12 @@ def bot():
                 if roi_n >= 3.5 or roi_n <= check_cierre:
                     side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    print(f"\n✅ CIERRE NETO: {roi_n:.2f}%")
+                    print(f"\n✅ CIERRE EN {roi_n:.2f}%")
                     time.sleep(2)
                     cap = obtener_saldo_real()
                     ops.remove(o)
 
-            # 2. ENTRADA (Solo si no hay nada en ops y nada en Binance)
+            # 2. ENTRADA (Solo si no hay nada abierto)
             if not ops:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
@@ -93,22 +91,18 @@ def bot():
                     if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
                         tipo = 'LONG' if cl > op_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
+                        cant = round(((cap * 0.95) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
                             ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
-                            print(f"\n🎯 DISPARO: {m}")
                             break
 
-            # Monitor
-            status = f"ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}%" if ops else "Acechando..."
+            status = f"ROI: {roi_n:.2f}%" if ops else "Acechando..."
             print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
             
-        except Exception as e:
-            time.sleep(5)
-        
+        except: time.sleep(5)
         time.sleep(max(1, 10 - (time.time() - t_l)))
 
 if __name__ == "__main__": 
