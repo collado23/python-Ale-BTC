@@ -4,7 +4,7 @@ from binance.client import Client
 from binance.enums import *
 
 # --- 🌐 1. SERVIDOR DE SALUD (Para que Railway no lo frene) ---
-class HealthCheck(BaseHTTPRequestHandler):
+class HealthCheck(BaseHTTPRequestHandler): 
     def do_GET(self): 
         self.send_response(200); self.end_headers()
         self.wfile.write(b"BOT-V143-ONLINE") 
