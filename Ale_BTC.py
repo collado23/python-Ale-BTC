@@ -27,7 +27,6 @@ def bot():
     ops = []
     
     def esta_en_horario():
-        # Horarios USA (11-19) y ASIA (22:30-06) - Hora Argentina
         ahora_utc = datetime.datetime.now(datetime.timezone.utc)
         arg = ahora_utc - datetime.timedelta(hours=3)
         h = arg.hour + arg.minute/60
@@ -42,7 +41,7 @@ def bot():
         except: return 0.0
 
     cap = get_saldo()
-    print(f"🎯 REINICIADO | SALDO: ${cap:.2f} | ROI INICIAL: 0% | SL: -4%")
+    print(f"🎯 REINICIADO | SALTO: 2.9% | TRAILING DESDE: 2.5% | SL: -4%")
 
     while True:
         try:
@@ -58,44 +57,51 @@ def bot():
                             's': symbol, 'l': 'LONG' if amt > 0 else 'SHORT',
                             'p': float(p['entryPrice']), 'q': abs(amt), 
                             'x': lev, 'be': True if lev >= 15 else False, 
-                            'piso': 2.4 if lev >= 15 else -4.0 
+                            'piso': 2.0 if lev >= 15 else -4.0 
                         })
                         print(f"🔗 REENGANCHADO A: {symbol}")
                         break
 
             # 1. GESTIÓN DE POSICIÓN
             for o in ops[:]:
-                # Usamos Mark Price para máxima precisión con la App
                 p_m = float(c.futures_mark_price(symbol=o['s'])['markPrice'])
                 diff = (p_m - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_m)/o['p']
                 
-                # ROI DESDE CERO (Sin descuentos previos)
+                # ROI DESDE CERO
                 roi_n = (diff * 100 * o['x'])
                 
+                # 🪜 ACTIVACIÓN TRAILING STOP A 2.5%
+                if roi_n >= 2.5 and not o['be']:
+                    o['be'] = True
+                    o['piso'] = 2.0 # Asegura ya un 2% de ganancia
+                    print(f"✅ TRAILING ACTIVADO EN 2.5% PARA {o['s']}")
+
                 # 🔥 SALTO A 15X AL 2.9%
                 if roi_n >= 2.9 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'], o['be'], o['piso'] = 15, True, 2.4
-                        print(f"🔥 SALTO 2.9% EN {o['s']} | TRAILING ON")
-                    except: o['be'] = True
+                        o['x'] = 15
+                        # Al saltar a 15x, el piso se ajusta para seguir la nueva potencia
+                        if o['piso'] < 2.4: o['piso'] = 2.4
+                        print(f"🔥 SALTO 15X EN {o['s']}")
+                    except: pass
 
-                # 🪜 TRAILING STOP (Sube el piso si el precio sube)
+                # LÓGICA DE SEGUIMIENTO (Sube el piso)
                 if o['be']:
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # CIERRE (Profit o Stop -4.0%)
+                # CIERRES
                 check_cierre = o['piso'] if o['be'] else -4.0
                 
-                if roi_n >= 5.0 or roi_n <= check_cierre:
+                if roi_n >= 6.0 or roi_n <= check_cierre:
                     lado_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=lado_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    print(f"✅ CIERRE EN {roi_n:.2f}% | SALDO: ${get_saldo():.2f}")
+                    print(f"✅ CIERRE EN {roi_n:.2f}% | PISO: {check_cierre:.2f}%")
                     time.sleep(5)
                     ops.remove(o)
 
-            # 2. ENTRADA (Misma lógica, 90% del Capital)
+            # 2. ENTRADA (Misma lógica original)
             if not ops and esta_en_horario():
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
@@ -112,7 +118,6 @@ def bot():
 
                     p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                     cap = get_saldo()
-                    # Usamos el 90% para que Binance no rebote por centavos
                     cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
                     
                     if cant > 0:
@@ -122,14 +127,12 @@ def bot():
                         print(f"🎯 DISPARO {tipo} EN {m}")
                         break
 
-            # Consola limpia
             if ops:
-                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | SL: {check_cierre:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
+                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {check_cierre:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
             else:
                 print(f"💰 ${cap:.2f} | Acechando... | {time.strftime('%H:%M:%S')}   ", end='\r')
 
         except Exception as e:
-            print(f"⚠️ Reintentando... ({e})")
             time.sleep(20)
         
         time.sleep(10)
