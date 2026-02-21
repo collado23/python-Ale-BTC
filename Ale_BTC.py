@@ -3,61 +3,57 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 1. EL "SEGURO" PARA QUE RAILWAY NO SE FRENE ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
+# --- 🌐 SERVIDOR PARA QUE RAILWAY NO LO FRENE ---
+class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
-        self.wfile.write(b"V143-ALIVE") 
+        self.wfile.write(b"BOT-OK") 
 
-def run_health_server():
-    # Railway usa la variable PORT para monitorear el bot
+def start_health_server():
     port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server = HTTPServer(("0.0.0.0", port), HealthCheck)
     server.serve_forever()
 
-# --- 🚀 2. MOTOR V143 REFORZADO ---
+# --- 🚀 MOTOR V143 REFORZADO ---
 def bot():
-    # Iniciamos el servidor de salud en un hilo aparte
-    threading.Thread(target=run_health_server, daemon=True).start()
+    threading.Thread(target=start_health_server, daemon=True).start()
     
-    # Conexión a Binance mediante Variables de Railway
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
     
     ops = []
     
-    def obtener_saldo_real():
+    def get_saldo():
         try:
-            res = c.futures_account_balance()
-            for b in res:
+            for b in c.futures_account_balance():
                 if b['asset'] == 'USDC': return float(b['balance'])
             return 0.0
         except: return 0.0
 
-    cap = obtener_saldo_real()
+    cap = get_saldo()
     print(f"🎯 V143 CONECTADO | SALDO: ${cap:.2f}")
 
     while True:
-        t_l = time.time()
         try:
-            # 🔄 RECUPERADOR (Evita el error de margen detectando tu XRP)
+            # 🔄 RECUPERADOR (Sin errores de 'leverage')
             if not ops:
-                posiciones = c.futures_position_information()
-                for p in posiciones:
-                    amt = float(p['positionAmt'])
+                pos = c.futures_position_information()
+                for p in pos:
+                    amt = float(p.get('positionAmt', 0))
                     if amt != 0:
-                        simbolo = p['symbol']
+                        symbol = p['symbol']
+                        lev = int(p.get('leverage', 5))
                         ops.append({
-                            's': simbolo, 'l': 'LONG' if amt > 0 else 'SHORT',
+                            's': symbol, 'l': 'LONG' if amt > 0 else 'SHORT',
                             'p': float(p['entryPrice']), 'q': abs(amt), 
-                            'x': int(p['leverage']), 'be': True if int(p['leverage']) >= 15 else False, 
-                            'piso': 2.0 if int(p['leverage']) >= 15 else -2.5
+                            'x': lev, 'be': True if lev >= 15 else False, 
+                            'piso': 2.0 if lev >= 15 else -2.5
                         })
-                        print(f"\n🔗 OPERACIÓN RECUPERADA: {simbolo}")
+                        print(f"🔗 RECUPERADO: {symbol}")
                         break
 
-            # 1. GESTIÓN DE RIESGO
+            # 1. GESTIÓN
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
@@ -68,23 +64,21 @@ def bot():
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 2.0
-                        print(f"\n🔥 SALTO A 15X")
+                        print(f"🔥 SALTO 15X")
                     except: o['be'] = True
 
                 if o['be']:
-                    nuevo_piso = roi_n - 0.5
-                    if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
+                    if (roi_n - 0.5) > o['piso']: o['piso'] = roi_n - 0.5
 
                 check_cierre = o['piso'] if o['be'] else -2.5
                 if roi_n >= 3.5 or roi_n <= check_cierre:
-                    side_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
-                    c.futures_create_order(symbol=o['s'], side=side_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    print(f"\n✅ CIERRE EN {roi_n:.2f}%")
-                    time.sleep(2)
-                    cap = obtener_saldo_real()
+                    c.futures_create_order(symbol=o['s'], side=SIDE_SELL if o['l'] == "LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                    print(f"✅ CIERRE: {roi_n:.2f}%")
+                    time.sleep(5)
+                    cap = get_saldo()
                     ops.remove(o)
 
-            # 2. ENTRADA (SOLO SI NO HAY NADA ABIERTO)
+            # 2. ENTRADA
             if not ops:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
@@ -94,20 +88,19 @@ def bot():
                     
                     if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        cant = round(((cap * 0.95) * 5) / p_act, 1 if 'XRP' not in m else 0)
+                        # Usamos el 100% para que no falle por monto mínimo
+                        cant = round((cap * 5) / p_act, 1 if 'XRP' not in m else 0)
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=SIDE_BUY if cl > op_v else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
                             ops.append({'s':m,'l':'LONG' if cl > op_v else 'SHORT','p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
                             break
 
-            print(f"💰 ${cap:.2f} | {time.strftime('%H:%M:%S')}   ", end='\r')
-            
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Aviso: {e}")
             time.sleep(10)
         
-        time.sleep(max(1, 10 - (time.time() - t_l)))
+        time.sleep(10)
 
 if __name__ == "__main__": 
     bot()
