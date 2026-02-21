@@ -3,7 +3,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 SERVER DE SALUD (Evita el Stopping Container) ---
+# --- 🌐 SERVER DE SALUD ---
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
@@ -42,11 +42,11 @@ def bot():
         except: return 0.0
 
     cap = get_saldo()
-    print(f"🎯 ALE_BTC ACTIVO | SALDO: ${cap:.2f} | SALTO 2% | SL -5%")
+    print(f"🎯 REINICIADO | SALDO: ${cap:.2f} | ROI INICIAL: 0% | SL: -4%")
 
     while True:
         try:
-            # 🔄 RECUPERADOR (Engancha lo abierto)
+            # 🔄 RECUPERADOR
             if not ops:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -58,42 +58,44 @@ def bot():
                             's': symbol, 'l': 'LONG' if amt > 0 else 'SHORT',
                             'p': float(p['entryPrice']), 'q': abs(amt), 
                             'x': lev, 'be': True if lev >= 15 else False, 
-                            'piso': 1.5 if lev >= 15 else -5.0
+                            'piso': 2.4 if lev >= 15 else -4.0 
                         })
                         print(f"🔗 REENGANCHADO A: {symbol}")
                         break
 
-            # 1. GESTIÓN CON TRAILING STOP
+            # 1. GESTIÓN DE POSICIÓN
             for o in ops[:]:
-                p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
-                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                roi_n = (diff * 100 * o['x']) - 0.8 # ROI NETO
+                # Usamos Mark Price para máxima precisión con la App
+                p_m = float(c.futures_mark_price(symbol=o['s'])['markPrice'])
+                diff = (p_m - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_m)/o['p']
                 
-                # 🔥 SALTO A 15X AL 2%
-                if roi_n >= 2.0 and o['x'] < 15: 
+                # ROI DESDE CERO (Sin descuentos previos)
+                roi_n = (diff * 100 * o['x'])
+                
+                # 🔥 SALTO A 15X AL 2.9%
+                if roi_n >= 2.9 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'], o['be'], o['piso'] = 15, True, 1.5
-                        print(f"🔥 SALTO 2% NETO EN {o['s']}")
+                        o['x'], o['be'], o['piso'] = 15, True, 2.4
+                        print(f"🔥 SALTO 2.9% EN {o['s']} | TRAILING ON")
                     except: o['be'] = True
 
-                # 🪜 TRAILING STOP (Asegura ganancia)
+                # 🪜 TRAILING STOP (Sube el piso si el precio sube)
                 if o['be']:
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # CIERRE (Profit 3.5% o Stop dinámico/inicial -5%)
-                check_cierre = o['piso'] if o['be'] else -5.0
+                # CIERRE (Profit o Stop -4.0%)
+                check_cierre = o['piso'] if o['be'] else -4.0
                 
-                if roi_n >= 3.5 or roi_n <= check_cierre:
+                if roi_n >= 5.0 or roi_n <= check_cierre:
                     lado_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=lado_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                    print(f"✅ CIERRE EN {roi_n:.2f}% | PISO: {o['piso']:.2f}%")
+                    print(f"✅ CIERRE EN {roi_n:.2f}% | SALDO: ${get_saldo():.2f}")
                     time.sleep(5)
-                    cap = get_saldo()
                     ops.remove(o)
 
-            # 2. ENTRADA (Lógica Original ale_btc + Horarios)
+            # 2. ENTRADA (Misma lógica, 90% del Capital)
             if not ops and esta_en_horario():
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
@@ -102,7 +104,6 @@ def bot():
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     v, v_a, o_v, o_a = cl[-2], cl[-3], op[-2], op[-3]
 
-                    # GATILLO ORIGINAL
                     if v > o_v and v > o_a and v > e9 and e9 > e27:
                         tipo = 'LONG'
                     elif v < o_v and v < o_a and v < e9 and e9 < e27:
@@ -111,21 +112,21 @@ def bot():
 
                     p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                     cap = get_saldo()
-                    # 95% para no fallar por falta de margen
-                    cant = round(((cap * 0.95) * 5) / p_act, 1 if 'XRP' not in m else 0)
+                    # Usamos el 90% para que Binance no rebote por centavos
+                    cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
                     
                     if cant > 0:
                         c.futures_change_leverage(symbol=m, leverage=5)
                         c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
-                        ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False,'piso':-5.0})
+                        ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False,'piso':-4.0})
                         print(f"🎯 DISPARO {tipo} EN {m}")
                         break
 
-            # Status en una sola línea
+            # Consola limpia
             if ops:
-                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
+                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | SL: {check_cierre:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
             else:
-                print(f"💰 ${cap:.2f} | Acechando (USA/ASIA)... | {time.strftime('%H:%M:%S')}   ", end='\r')
+                print(f"💰 ${cap:.2f} | Acechando... | {time.strftime('%H:%M:%S')}   ", end='\r')
 
         except Exception as e:
             print(f"⚠️ Reintentando... ({e})")
