@@ -1,235 +1,120 @@
-import os
-import time
-import threading
-from datetime import datetime
-import pytz
-
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import os, time, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer  
 from binance.client import Client
 from binance.enums import *
 
-# ===== CONFIG =====
-SYMBOLS = ["SOLUSDC", "XRPUSDC", "BNBUSDC"]
-LEVERAGE_NORMAL = 5
-LEVERAGE_USA = 7
-LEVERAGE_BOOST = 15
-
-BOOST_TRIGGER = 2.9
-STOP_LOSS = -1.6
-TRAILING_GAP = 0.5
-FEE = 0.08
-
-# ===== SERVER SALUD (Railway) =====
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"BOT ONLINE")
+# --- 🌐 1. SERVIDOR DE SALUD (Para que Railway no lo frene) ---
+class HealthCheck(BaseHTTPRequestHandler):
+    def do_GET(self): 
+        self.send_response(200); self.end_headers()
+        self.wfile.write(b"BOT-V143-ONLINE") 
 
 def run_server():
     port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server = HTTPServer(("0.0.0.0", port), HealthCheck)
     server.serve_forever()
 
-# ===== SESIÓN USA =====
-def is_usa_session():
-    utc_now = datetime.utcnow()
-    ny = pytz.timezone("America/New_York")
-    ny_time = utc_now.replace(tzinfo=pytz.utc).astimezone(ny)
-    return 9 <= ny_time.hour < 16
-
-# ===== BALANCE USDC =====
-def get_usdc_balance(client):
-    balances = client.futures_account_balance()
-    for b in balances:
-        if b['asset'] == 'USDC':
-            return float(b['balance'])
-    return 0.0
-
-# ===== CALCULAR CANTIDAD =====
-def calculate_qty(client, symbol, price, leverage):
-    balance = get_usdc_balance(client)
-    capital = balance * 0.90
-    qty = (capital * leverage) / price
-
-    if "XRP" in symbol:
-        return round(qty, 0)
-    else:
-        return round(qty, 2)
-
-# ===== RECONEXIÓN =====
-def reconnect_position(client):
-    positions = client.futures_position_information()
-    for p in positions:
-        amt = float(p['positionAmt'])
-        if amt != 0:
-            return {
-                "symbol": p['symbol'],
-                "side": "LONG" if amt > 0 else "SHORT",
-                "entry": float(p['entryPrice']),
-                "qty": abs(amt),
-                "leverage": int(p['leverage']),
-                "max_roi": 0
-            }
-    return None
-
-# ===== BOT =====
+# --- 🚀 2. MOTOR DEL BOT ---
 def bot():
+    # Arrancamos el servidor de salud primero
     threading.Thread(target=run_server, daemon=True).start()
+    
+    # Conectamos usando tus Variables de Railway
+    api_key = os.getenv("BINANCE_API_KEY")
+    api_secret = os.getenv("BINANCE_API_SECRET")
+    c = Client(api_key, api_secret)
+    
+    ops = []
+    
+    def get_saldo():
+        try:
+            res = c.futures_account_balance()
+            for b in res:
+                if b['asset'] == 'USDC': return float(b['balance'])
+            return 0.0
+        except: return 0.0
 
-    client = Client(
-        os.getenv("BINANCE_API_KEY"),
-        os.getenv("BINANCE_API_SECRET")
-    )
-
-    operation = reconnect_position(client)
-    last_loss_symbol = None
-    pause_until = 0
-    symbol_index = 0
-
-    print("🚀 BOT V143 INICIADO")
+    cap = get_saldo()
+    print(f"🎯 V143 CONECTADO | SALDO: ${cap:.2f}")
 
     while True:
         try:
-            now = time.time()
-
-            if now < pause_until:
-                print("⏸ Descansando 1 minuto...", end="\r")
-                time.sleep(5)
-                continue
-
-            # ===== MODO SEGÚN SESIÓN =====
-            if is_usa_session():
-                leverage_entry = LEVERAGE_USA
-                boost_trigger = 2.5
-                session_label = "🇺🇸 USA"
-            else:
-                leverage_entry = LEVERAGE_NORMAL
-                boost_trigger = BOOST_TRIGGER
-                session_label = "🌍 GLOBAL"
-
-            # ===== GESTIÓN =====
-            if operation:
-                price = float(client.futures_symbol_ticker(
-                    symbol=operation["symbol"]
-                )["price"])
-
-                diff = (
-                    (price - operation["entry"]) / operation["entry"]
-                    if operation["side"] == "LONG"
-                    else (operation["entry"] - price) / operation["entry"]
-                )
-
-                roi = (diff * 100 * operation["leverage"]) - FEE
-
-                # Stop Loss
-                if roi <= STOP_LOSS:
-                    side_close = SIDE_SELL if operation["side"] == "LONG" else SIDE_BUY
-
-                    client.futures_create_order(
-                        symbol=operation["symbol"],
-                        side=side_close,
-                        type=ORDER_TYPE_MARKET,
-                        quantity=operation["qty"]
-                    )
-
-                    print(f"\n🛑 STOP LOSS {operation['symbol']} {roi:.2f}%")
-
-                    last_loss_symbol = operation["symbol"]
-                    pause_until = time.time() + 60
-                    symbol_index = (SYMBOLS.index(operation["symbol"]) + 1) % len(SYMBOLS)
-                    operation = None
-                    continue
-
-                # Salto a 15x
-                if roi >= boost_trigger and operation["leverage"] < 15:
-                    client.futures_change_leverage(
-                        symbol=operation["symbol"],
-                        leverage=LEVERAGE_BOOST
-                    )
-                    operation["leverage"] = LEVERAGE_BOOST
-                    print(f"\n🔥 SALTO A 15X {operation['symbol']}")
-
-                # Trailing dinámico
-                if operation["leverage"] == 15:
-                    if roi > operation["max_roi"]:
-                        operation["max_roi"] = roi
-
-                    if roi <= operation["max_roi"] - TRAILING_GAP:
-                        side_close = SIDE_SELL if operation["side"] == "LONG" else SIDE_BUY
-
-                        client.futures_create_order(
-                            symbol=operation["symbol"],
-                            side=side_close,
-                            type=ORDER_TYPE_MARKET,
-                            quantity=operation["qty"]
-                        )
-
-                        print(f"\n✅ TRAILING EXIT {operation['symbol']} {roi:.2f}%")
-                        operation = None
-                        continue
-
-                print(f"{session_label} | {operation['symbol']} | ROI: {roi:.2f}%   ", end="\r")
-
-            # ===== ENTRADA =====
-            if not operation:
-                for i in range(len(SYMBOLS)):
-                    symbol = SYMBOLS[(symbol_index + i) % len(SYMBOLS)]
-
-                    if symbol == last_loss_symbol:
-                        continue
-
-                    klines = client.futures_klines(symbol=symbol, interval='1m', limit=30)
-                    closes = [float(k[4]) for k in klines]
-                    opens = [float(k[1]) for k in klines]
-
-                    e9 = sum(closes[-9:]) / 9
-                    e27 = sum(closes[-27:]) / 27
-
-                    last_close = closes[-2]
-                    last_open = opens[-2]
-
-                    if (last_close > last_open and e9 > e27) or \
-                       (last_close < last_open and e9 < e27):
-
-                        price = float(client.futures_symbol_ticker(symbol=symbol)["price"])
-                        qty = calculate_qty(client, symbol, price, leverage_entry)
-
-                        if qty <= 0:
-                            continue
-
-                        side = SIDE_BUY if last_close > last_open else SIDE_SELL
-
-                        client.futures_change_leverage(
-                            symbol=symbol,
-                            leverage=leverage_entry
-                        )
-
-                        client.futures_create_order(
-                            symbol=symbol,
-                            side=side,
-                            type=ORDER_TYPE_MARKET,
-                            quantity=qty
-                        )
-
-                        operation = {
-                            "symbol": symbol,
-                            "side": "LONG" if side == SIDE_BUY else "SHORT",
-                            "entry": price,
-                            "qty": qty,
-                            "leverage": leverage_entry,
-                            "max_roi": 0
-                        }
-
-                        symbol_index = SYMBOLS.index(symbol)
-                        print(f"\n🎯 ENTRADA {symbol}")
+            # 🔄 RECUPERADOR ANTIFALLOS (Solución al error 'leverage')
+            if not ops:
+                posiciones = c.futures_position_information()
+                for p in posiciones:
+                    amt = float(p.get('positionAmt', 0))
+                    if amt != 0:
+                        simbolo = p['symbol']
+                        # Si 'leverage' no viene, usamos 5 por defecto para que no de error
+                        palanca_actual = int(p.get('leverage', 5))
+                        
+                        ops.append({
+                            's': simbolo, 'l': 'LONG' if amt > 0 else 'SHORT',
+                            'p': float(p['entryPrice']), 'q': abs(amt), 
+                            'x': palanca_actual, 
+                            'be': True if palanca_actual >= 15 else False, 
+                            'piso': 2.0 if palanca_actual >= 15 else -2.5
+                        })
+                        print(f"🔗 REENGANCHADO A: {simbolo}")
                         break
 
-            time.sleep(5)
+            # 1. GESTIÓN DE LA OPERACIÓN
+            for o in ops[:]:
+                p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
+                diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
+                roi_n = (diff * 100 * o['x']) - 0.9 
+                
+                # Salto a 15x en 2.5% NETO
+                if roi_n >= 2.5 and o['x'] < 15: 
+                    try:
+                        c.futures_change_leverage(symbol=o['s'], leverage=15)
+                        o['x'], o['be'], o['piso'] = 15, True, 2.0
+                        print(f"🔥 SALTO 15X!")
+                    except: o['be'] = True
 
+                if o['be']:
+                    if (roi_n - 0.5) > o['piso']: o['piso'] = roi_n - 0.5
+
+                check_cierre = o['piso'] if o['be'] else -2.5
+                if roi_n >= 3.5 or roi_n <= check_cierre:
+                    lado_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
+                    c.futures_create_order(symbol=o['s'], side=lado_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                    print(f"✅ CIERRE EN {roi_n:.2f}%")
+                    time.sleep(5)
+                    cap = get_saldo()
+                    ops.remove(o)
+
+            # 2. ENTRADA (ACECHANDO)
+            if not ops:
+                for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
+                    k = c.futures_klines(symbol=m, interval='1m', limit=50)
+                    cl, op_v = float(k[-2][4]), float(k[-2][1]) 
+                    e9 = sum([float(x[4]) for x in k[-9:]])/9
+                    e27 = sum([float(x[4]) for x in k[-27:]])/27
+                    
+                    if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
+                        p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
+                        # Usamos el 100% por ser cuenta pequeña
+                        cant = round((cap * 5) / p_act, 1 if 'XRP' not in m else 0)
+                        if cant > 0:
+                            c.futures_change_leverage(symbol=m, leverage=5)
+                            c.futures_create_order(symbol=m, side=SIDE_BUY if cl > op_v else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
+                            ops.append({'s':m,'l':'LONG' if cl > op_v else 'SHORT','p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
+                            break
+
+            # Log de seguimiento
+            if ops:
+                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
+            else:
+                print(f"💰 ${cap:.2f} | Acechando... | {time.strftime('%H:%M:%S')}   ", end='\r')
+            
         except Exception as e:
-            print(f"\n⚠ ERROR: {e}")
-            time.sleep(10)
+            # Esto evita que el bot se detenga por errores de conexión
+            print(f"⚠️ Reintentando... ({e})")
+            time.sleep(15)
+        
+        time.sleep(10)
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     bot()
