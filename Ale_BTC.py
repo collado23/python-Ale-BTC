@@ -1,28 +1,29 @@
 import os, time, threading
-from http.server import BaseHTTPRequestHandler, HTTPServer   
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
 from binance.enums import *
 
-# --- 🌐 1. SERVER DE SALUD ---
+# --- 🌐 1. SERVER DE SALUD (Para evitar el Stopping Container) ---
 class H(BaseHTTPRequestHandler):
     def do_GET(self): 
         self.send_response(200); self.end_headers()
         self.wfile.write(b"Bot V143 Online") 
 
 def s_h():
-    try: HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), H).serve_forever()
+    puerto = int(os.getenv("PORT", 8080))
+    try: HTTPServer(("0.0.0.0", puerto), H).serve_forever()
     except: pass
 
 # --- 🚀 2. MOTOR V143 ---
 def bot():
     threading.Thread(target=s_h, daemon=True).start()
     
-    # 🔑 VARIABLES DE ENTORNO
+    # 🔑 Variables desde Railway
     api_key = os.getenv("BINANCE_API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET")
     c = Client(api_key, api_secret)
     
-    ops = []
+    ops = [] # Memoria del bot
     
     def obtener_saldo_real():
         try:
@@ -33,102 +34,77 @@ def bot():
         except: return 0.0
 
     cap = obtener_saldo_real()
-    print(f"🎯 V143 ACTIVADO | SALDO: ${cap:.2f}")
+    print(f"🎯 V143 | SALDO: ${cap:.2f} | STOP -2.5 | SALTO 2.0")
 
     while True:
         t_l = time.time()
         try:
-            # 🔄 RECUPERADOR AGRESIVO (Revisa Binance SIEMPRE si la lista está vacía)
+            # 🔄 RECUPERADOR CRÍTICO: Mira Binance antes de hacer nada
             if not ops:
-                todas_las_posiciones = c.futures_position_information()
-                for p in todas_las_posiciones:
-                    cantidad = float(p['positionAmt'])
-                    # Si la cantidad no es 0, hay una operación real abierta en Binance
-                    if cantidad != 0:
+                pos = c.futures_position_information()
+                for p in pos:
+                    amt = float(p['positionAmt'])
+                    if amt != 0: # ¡ENCONTRÓ LA OPERACIÓN!
                         simbolo = p['symbol']
-                        lado = 'LONG' if cantidad > 0 else 'SHORT'
-                        precio_e = float(p['entryPrice'])
-                        apalancamiento = int(p['leverage'])
-                        
-                        # Enganchamos la operación a la memoria del bot
+                        lado = 'LONG' if amt > 0 else 'SHORT'
                         ops.append({
-                            's': simbolo, 
-                            'l': lado, 
-                            'p': precio_e, 
-                            'q': abs(cantidad), 
-                            'x': apalancamiento, 
-                            'be': True if apalancamiento >= 15 else False, 
-                            'piso': 1.5 if apalancamiento >= 15 else -2.5
+                            's': simbolo, 'l': lado, 'p': float(p['entryPrice']), 
+                            'q': abs(amt), 'x': int(p['leverage']), 
+                            'be': True if int(p['leverage']) >= 15 else False, 
+                            'piso': 1.5 if int(p['leverage']) >= 15 else -2.5
                         })
-                        print(f"\n✅ OPERACIÓN RECUPERADA: {simbolo} ({lado}) a {apalancamiento}x")
-                        break # Salimos del for para gestionar esta operación encontrada
+                        print(f"\n🔗 REENGANCHADO A BINANCE: {simbolo}")
+                        break
 
-            # 1. GESTIÓN DE LA OPERACIÓN (ROI NETO 0.9)
+            # 1. GESTIÓN (Si hay operación abierta o recuperada)
             for o in ops[:]:
                 p_a = float(c.futures_symbol_ticker(symbol=o['s'])['price'])
                 diff = (p_a - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_a)/o['p']
-                
-                # ROI NETO (Ajustado con tu 0.9 de comisión)
                 roi_n = (diff * 100 * o['x']) - 0.9 
                 
-                # 🔥 SALTO A 15X (A los 2.0% NETO)
                 if roi_n >= 2.0 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'], o['be'], o['piso'] = 15, True, 1.5
-                        print(f"\n🔥 SALTO REALIZADO EN {o['s']}")
+                        print(f"\n🔥 SALTO 15X")
                     except: o['be'] = True
 
-                # 🪜 ESCALADOR +0.5
                 if o['be']:
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # 📉 CIERRE (Stop -2.5% o Piso dinámico)
                 check_cierre = o['piso'] if o['be'] else -2.5
                 if roi_n >= 3.5 or roi_n <= check_cierre:
                     side_cierre = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
-                    try:
-                        c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
-                        print(f"\n✅ CIERRE EJECUTADO EN {o['s']} | ROI FINAL: {roi_n:.2f}%")
-                    except Exception as e:
-                        print(f"\n❌ Error al cerrar: {e}")
-                    
+                    c.futures_create_order(symbol=o['s'], side=side_cierre, type=ORDER_TYPE_MARKET, quantity=o['q'])
+                    print(f"\n✅ CIERRE NETO: {roi_n:.2f}%")
                     time.sleep(2)
                     cap = obtener_saldo_real()
                     ops.remove(o)
 
-            # 2. BÚSQUEDA DE ENTRADA (Solo si no hay nada abierto en Binance)
+            # 2. ENTRADA (Solo si no hay nada en ops y nada en Binance)
             if not ops:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
                     cl, op_v = float(k[-2][4]), float(k[-2][1]) 
-                    k_full = [float(x[4]) for x in k]
-                    e9, e27 = sum(k_full[-9:])/9, sum(k_full[-27:])/27
+                    e9 = sum([float(x[4]) for x in k[-9:]])/9
+                    e27 = sum([float(x[4]) for x in k[-27:]])/27
                     
                     if (cl > op_v and cl > e9 and e9 > e27) or (cl < op_v and cl < e9 and e9 < e27):
                         tipo = 'LONG' if cl > op_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        
-                        # Calculamos cantidad usando el 90% del saldo real
                         cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
-                            try:
-                                c.futures_change_leverage(symbol=m, leverage=5)
-                                side_orden = SIDE_BUY if tipo == 'LONG' else SIDE_SELL
-                                c.futures_create_order(symbol=m, side=side_orden, type=ORDER_TYPE_MARKET, quantity=cant)
-                                ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
-                                print(f"\n🎯 DISPARO ENTRADA: {m} ({tipo})")
-                                break
-                            except: pass
+                            c.futures_change_leverage(symbol=m, leverage=5)
+                            c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
+                            ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False, 'piso': -2.5})
+                            print(f"\n🎯 DISPARO: {m}")
+                            break
 
-            # MONITOR
-            if ops:
-                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
-            else:
-                if int(time.time()) % 60 == 0: cap = obtener_saldo_real()
-                print(f"💰 ${cap:.2f} | Buscando señal... | {time.strftime('%H:%M:%S')}   ", end='\r')
+            # Monitor
+            status = f"ROI: {roi_n:.2f}% | PISO: {o['piso']:.2f}%" if ops else "Acechando..."
+            print(f"💰 ${cap:.2f} | {status} | {time.strftime('%H:%M:%S')}   ", end='\r')
             
         except Exception as e:
             time.sleep(5)
