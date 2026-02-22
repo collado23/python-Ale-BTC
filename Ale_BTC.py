@@ -1,5 +1,5 @@
 import os, time, threading, datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer  
+from http.server import BaseHTTPRequestHandler, HTTPServer 
 from binance.client import Client
 from binance.enums import *
 
@@ -16,7 +16,7 @@ def run_server():
         server.serve_forever()
     except Exception: pass
 
-# --- 🚀 MOTOR V143 - VERSIÓN LIBRE ---
+# --- 🚀 MOTOR V144 - VERSIÓN PROTEGIDA ---
 def bot():
     threading.Thread(target=run_server, daemon=True).start()
     
@@ -27,11 +27,9 @@ def bot():
     ops = []
     
     def esta_en_horario():
-        # Hora Argentina (UTC-3)
         ahora_utc = datetime.datetime.now(datetime.timezone.utc)
         arg = ahora_utc - datetime.timedelta(hours=3)
         h = arg.hour + arg.minute/60
-        # USA: 11 a 18 | ASIA: 22:30 a 06
         return (11.0 <= h <= 18.0) or (h >= 22.5 or h <= 6.0)
 
     def get_saldo():
@@ -41,13 +39,13 @@ def bot():
             return 0.0
         except Exception: return 0.0
 
-    print(f"🎯 ALE_BTC | VERSIÓN LIBRE | SL -4% | ANTI-GOLPES 15X")
+    print(f"🎯 ALE_BTC | PROTECCIÓN TOTAL ACTIVADA | 80% MARGEN")
 
     while True:
         try:
             cap = get_saldo()
             
-            # 🔄 RECUPERADOR (Evita abrir doble si el bot se reinicia)
+            # RECUPERADOR DE POSICIÓN
             if not ops:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -59,7 +57,7 @@ def bot():
                             's': symbol, 'l': 'LONG' if amt > 0 else 'SHORT',
                             'p': float(p['entryPrice']), 'q': abs(amt), 
                             'x': lev, 'be': True if lev >= 15 else False, 
-                            'piso': 2.0 if lev >= 15 else -4.0 
+                            'piso': 2.4 if lev >= 15 else -4.0 
                         })
                         print(f"🔗 REENGANCHADO A: {symbol}")
                         break
@@ -70,28 +68,33 @@ def bot():
                 diff = (p_m - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_m)/o['p']
                 roi_n = (diff * 100 * o['x'])
 
-                # 🪜 TRAILING STOP (Inicia al tocar 2.5%)
+                # 🪜 TRAILING STOP (Asegura 2% al tocar 2.5%)
                 if roi_n >= 2.5 and not o['be']:
                     o['be'] = True
                     o['piso'] = 2.0
                     print(f"✅ TRAILING ACTIVO (ASEGURANDO 2%)")
 
-                # 🔥 SALTO 15X (En 2.9%) CON FRENO DE MANO
+                # 🔥 SALTO 15X CON ESCUDO ANTI-BLOQUEO
                 if roi_n >= 2.9 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
                         o['x'] = 15
-                        o['be'] = True
-                        o['piso'] = 2.4 # Piso instantáneo para evitar el -15%
-                        print(f"🔥 SALTO 15X - PISO BLOQUEADO EN 2.4%")
-                    except Exception: pass
+                        print(f"🔥 SALTO 15X EXITOSO")
+                    except Exception:
+                        print(f"⚠️ BINANCE REBOTÓ EL SALTO (MARGEN), SEGUIMOS A 5X")
+                    
+                    # Pase lo que pase, clavamos el piso de seguridad alto
+                    o['be'] = True
+                    if o['piso'] < 2.4: 
+                        o['piso'] = 2.4
+                        print(f"🛡️ PISO DE SEGURIDAD PROTEGIDO EN 2.4%")
 
-                # El resorte del Trailing (0.5% de distancia)
+                # Efecto resorte del Trailing (0.5% de distancia)
                 if o['be']:
                     nuevo_piso = roi_n - 0.5
                     if nuevo_piso > o['piso']: o['piso'] = nuevo_piso
 
-                # CIERRES (Por Piso de seguridad o Stop Loss)
+                # CIERRES POR PISO O STOP LOSS
                 check_cierre = o['piso'] if o['be'] else -4.0
                 
                 if roi_n >= 15.0 or roi_n <= check_cierre:
@@ -101,7 +104,7 @@ def bot():
                     time.sleep(5)
                     ops.remove(o)
 
-            # 2. ENTRADA (SOLO SI ESTÁ EN HORARIO)
+            # 2. ENTRADA (USANDO 80% PARA DEJAR AIRE)
             if not ops and esta_en_horario():
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
@@ -112,21 +115,21 @@ def bot():
                         tipo = 'LONG' if cl > o_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                         cap = get_saldo()
-                        # Usamos el 80% para evitar errores de margen
+                        # USAMOS 0.80 PARA EVITAR EL ERROR DE MARGEN INSUFICIENTE
                         cant = round(((cap * 0.80) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
                             ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False,'piso':-4.0})
-                            print(f"🎯 DISPARO {tipo} EN {m}")
+                            print(f"🎯 DISPARO {tipo} EN {m} (Protegido)")
                             break
 
             # Consola de estado
             if ops:
                 print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {check_cierre:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
             else:
-                txt = "Acechando..." if esta_en_horario() else "Esperando Wall Street/Asia..."
+                txt = "Acechando..." if esta_en_horario() else "Fuera de horario..."
                 print(f"💰 ${cap:.2f} | {txt} | {time.strftime('%H:%M:%S')}   ", end='\r')
 
         except Exception as e:
