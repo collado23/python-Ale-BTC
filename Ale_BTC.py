@@ -16,7 +16,6 @@ def run_server():
         server.serve_forever()
     except Exception: pass
 
-# --- 🚀 MOTOR V145 - SINCRONIZADOR DE FUERZA ---
 def bot():
     threading.Thread(target=run_server, daemon=True).start()
     
@@ -26,12 +25,6 @@ def bot():
     
     ops = []
     
-    def esta_en_horario():
-        ahora_utc = datetime.datetime.now(datetime.timezone.utc)
-        arg = ahora_utc - datetime.timedelta(hours=3)
-        h = arg.hour + arg.minute/60
-        return (11.0 <= h <= 18.0) or (h >= 22.5 or h <= 6.0)
-
     def get_saldo():
         try:
             for b in c.futures_account_balance():
@@ -39,13 +32,14 @@ def bot():
             return 0.0
         except Exception: return 0.0
 
-    print(f"🎯 ALE_BTC | RESET DE APALANCAMIENTO ACTIVADO")
+    print(f"🎯 ALE_BTC | FORZADO 5X ACTIVADO | BLINDAJE V148")
 
     while True:
         try:
             cap = get_saldo()
-            
-            # --- RECUPERADOR CON BAJADA A 5X FORZADA ---
+            limite_alcanzado = cap >= 1000.0
+
+            # 1. RECUPERADOR Y FORZADO DE 5X
             if not ops:
                 pos = c.futures_position_information()
                 for p in pos:
@@ -54,12 +48,12 @@ def bot():
                         symbol = p['symbol']
                         lev_actual = int(p.get('leverage', 5))
                         
-                        # SI BINANCE ESTÁ EN 15X PERO EL BOT ACABA DE EMPEZAR, BAJAR A 5X
+                        # Si detecta que está en 15x y no debería, intenta bajarlo
                         if lev_actual != 5:
                             try:
                                 c.futures_change_leverage(symbol=symbol, leverage=5)
                                 lev_actual = 5
-                                print(f"📉 BAJANDO FORZADO A 5X EN {symbol}")
+                                print(f"📉 AJUSTANDO POSICIÓN A 5X...")
                             except: pass
 
                         ops.append({
@@ -67,32 +61,24 @@ def bot():
                             'p': float(p['entryPrice']), 'q': abs(amt), 
                             'x': lev_actual, 'be': False, 'piso': -4.0 
                         })
-                        print(f"🔗 REENGANCHADO A 5X: {symbol}")
                         break
 
-            # 1. GESTIÓN DE RIESGO Y CIERRES
+            # 2. GESTIÓN DE RIESGO
             for o in ops[:]:
                 p_m = float(c.futures_mark_price(symbol=o['s'])['markPrice'])
                 diff = (p_m - o['p'])/o['p'] if o['l']=="LONG" else (o['p'] - p_m)/o['p']
                 roi_n = (diff * 100 * o['x'])
 
-                # 🪜 TRAILING STOP (Asegura 2% al tocar 2.5%)
                 if roi_n >= 2.5 and not o['be']:
-                    o['be'] = True
-                    o['piso'] = 2.0
-                    print(f"✅ TRAILING ACTIVO (ASEGURANDO 2%)")
+                    o['be'] = True; o['piso'] = 2.0
 
-                # 🔥 SALTO 15X (Solo cuando ya ganamos 2.9%)
                 if roi_n >= 2.9 and o['x'] < 15: 
                     try:
                         c.futures_change_leverage(symbol=o['s'], leverage=15)
-                        o['x'] = 15
-                        print(f"🔥 SALTO 15X EXITOSO")
-                    except Exception:
-                        print(f"⚠️ REBOTE DE MARGEN, SEGUIMOS A 5X")
-                    
-                    o['be'] = True
-                    if o['piso'] < 2.4: o['piso'] = 2.4
+                        o['x'] = 15; o['be'] = True
+                        if o['piso'] < 2.4: o['piso'] = 2.4
+                        print(f"🔥 SALTO EXITOSO A 15X")
+                    except: pass
 
                 if o['be']:
                     nuevo_piso = roi_n - 0.5
@@ -104,11 +90,10 @@ def bot():
                     lado_c = SIDE_SELL if o['l'] == "LONG" else SIDE_BUY
                     c.futures_create_order(symbol=o['s'], side=lado_c, type=ORDER_TYPE_MARKET, quantity=o['q'])
                     print(f"✅ CIERRE EN {roi_n:.2f}%")
-                    time.sleep(5)
-                    ops.remove(o)
+                    time.sleep(2); ops.remove(o)
 
-            # 2. ENTRADA (ASEGURANDO 5X DESDE EL DISPARO)
-            if not ops and esta_en_horario():
+            # 3. ENTRADA CON PAUSA DE SEGURIDAD (EL BLINDAJE)
+            if not ops and not limite_alcanzado:
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl, o_v = float(k[-2][4]), float(k[-2][1])
@@ -117,31 +102,26 @@ def bot():
                     if (cl > o_v and cl > e9 and e9 > e27) or (cl < o_v and cl < e9 and e9 < e27):
                         tipo = 'LONG' if cl > o_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        cap = get_saldo()
                         
-                        # AJUSTE DE MARGEN 80%
+                        # --- PASOS DE BLINDAJE ---
+                        print(f"🛠️ PREPARANDO ENTRADA EN {m}...")
+                        try:
+                            # 1. Forzamos el cambio a 5x ANTES de comprar
+                            c.futures_change_leverage(symbol=m, leverage=5)
+                            time.sleep(2) # Esperamos 2 segundos para que Binance procese
+                        except: pass
+                        
                         cant = round(((cap * 0.80) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
-                            # FORZAMOS 5X ANTES DE COMPRAR
-                            try:
-                                c.futures_change_leverage(symbol=m, leverage=5)
-                            except: pass
-                            
                             c.futures_create_order(symbol=m, side=SIDE_BUY if tipo=='LONG' else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
                             ops.append({'s':m,'l':tipo,'p':p_act,'q':cant,'x':5,'be':False,'piso':-4.0})
-                            print(f"🎯 DISPARO {tipo} EN {m} A 5X")
+                            print(f"🎯 DISPARO OK A 5X")
                             break
 
-            if ops:
-                print(f"💰 ${cap:.2f} | ROI: {roi_n:.2f}% | PISO: {check_cierre:.2f}% | {time.strftime('%H:%M:%S')}   ", end='\r')
-            else:
-                txt = "Acechando..." if esta_en_horario() else "Fuera de horario..."
-                print(f"💰 ${cap:.2f} | {txt} | {time.strftime('%H:%M:%S')}   ", end='\r')
+            time.sleep(10)
 
         except Exception as e:
-            time.sleep(15)
-        
-        time.sleep(10)
+            time.sleep(10)
 
 if __name__ == "__main__": bot()
