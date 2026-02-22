@@ -112,8 +112,8 @@ def bot():
                         tipo = 'LONG' if cl > o_v else 'SHORT'
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                         cap = get_saldo()
-                        # Usamos el 90% para evitar errores de margen
-                        cant = round(((cap * 0.90) * 5) / p_act, 1 if 'XRP' not in m else 0)
+                        # Usamos el 80% para evitar errores de margen
+                        cant = round(((cap * 0.80) * 5) / p_act, 1 if 'XRP' not in m else 0)
                         
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=5)
