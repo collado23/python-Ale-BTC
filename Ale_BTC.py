@@ -7,7 +7,7 @@ def bot():
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     piso_memoria = {} 
-    ultimo_cierre_ts = 0
+    ultimo_cierre_ts = 0 
 
     def esta_en_horario():
         tz_arg = datetime.timezone(datetime.timedelta(hours=-3))
