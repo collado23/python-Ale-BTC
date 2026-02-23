@@ -3,19 +3,21 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))  
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
-    # Variables de control
-    max_roi_sesion = 0
+    max_roi = 0
+    piso = -4.0
 
-    print("🚀 V178 CONTROL TOTAL | MURO 2.0% | ENGANCHE INTELIGENTE")
+    print("🚀 V178 - ENGANCHE ACTIVADO - MURO 2.0%")
 
     while True:
         try:
             acc = c.futures_account()
-            disponible = next((float(b['asset'] == 'USDC' and b['availableBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
+            disponible = next((float(b['availableBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
             pos = c.futures_position_information()
+            
+            # --- ESTO ES EL ENGANCHE: Detecta la moneda que ya está operando ---
             activa = next((p for p in pos if float(p.get('positionAmt', 0)) != 0), None)
 
             if activa:
@@ -25,35 +27,32 @@ def bot():
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
                 m_p = float(c.futures_mark_price(symbol=sym)['mark_price'])
                 
-                # ROI actual con x5
                 roi = ((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * 100 * 5 
                 
-                # RECONSTRUCCIÓN DE MEMORIA: 
-                # Si el ROI actual es mayor al máximo de la sesión, lo actualizamos.
-                if roi > max_roi_sesion:
-                    max_roi_sesion = roi
+                # Memoria del máximo para que no te cierre antes
+                if roi > max_roi:
+                    max_roi = roi
                 
-                # DETERMINACIÓN DEL PISO (EL MURO)
-                if max_roi_sesion >= 2.0:
-                    # El piso es el mayor entre 2.0 y el trailing (max - 0.5)
-                    piso_actual = max(2.0, max_roi_sesion - 0.5)
+                # LÓGICA DEL MURO 2.0%
+                if max_roi >= 2.0:
+                    piso = max(2.0, max_roi - 0.5)
                 else:
-                    # Si no llegó a 2%, el piso es el Stop Loss de -4.0%
-                    piso_actual = -4.0
+                    piso = -4.0 
                 
-                # LÓGICA DE CIERRE IMPLACABLE
-                if roi <= piso_actual:
+                if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"💰 CIERRE EJECUTADO: ROI {roi:.2f}% | PISO {piso_actual:.2f}%")
-                    max_roi_sesion = 0
+                    print(f"💰 CIERRE EN: {roi:.2f}% | PISO: {piso:.2f}%")
+                    max_roi = 0
+                    piso = -4.0
                     time.sleep(30)
                 
-                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi_sesion:.2f}% | PISO: {piso_actual:.2f}%", end='\r')
+                print(f"📊 {sym} | ROI: {roi:.2f}% | PISO: {piso:.2f}%", end='\r')
 
             else:
-                max_roi_sesion = 0
-                # BUSCADOR DE ENTRADAS (EMA 9/27)
+                # Si no hay nada abierto, busca nuevas según tu estrategia
+                max_roi = 0
+                piso = -4.0
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl, e9, e27 = float(k[-2][4]), sum(float(x[4]) for x in k[-9:])/9, sum(float(x[4]) for x in k[-27:])/27
@@ -64,9 +63,9 @@ def bot():
                         cant = round(((disponible * 0.90) * 5) / p_act, 1)
                         c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
                         break
-                print(f"🔍 Acechando mercado... ${disponible:.2f}", end='\r')
+                print(f"🔍 Acechando... Saldo: ${disponible:.2f}", end='\r')
 
-        except Exception as e:
+        except Exception:
             time.sleep(2)
         time.sleep(2)
 
