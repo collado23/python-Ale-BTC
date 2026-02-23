@@ -4,7 +4,7 @@ from binance.enums import *
 
 def bot():
     # Usamos las variables de entorno que ya tenés en Railway
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20})
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20}) 
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     piso_memoria = {} 
