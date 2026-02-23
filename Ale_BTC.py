@@ -3,13 +3,13 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))  
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     max_roi = 0
     piso = -4.0
 
-    print("🚀 V178 DIEZ PUNTOS | TRAILING ESCALONADO | ESPERA 30s")
+    print("🚀 V180 DEFINITIVO | MURO 2% | ESPERA 30s | TRAILING 0.5%")
 
     while True:
         try:
@@ -24,7 +24,7 @@ def bot():
                 q = abs(float(activa['positionAmt']))
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
                 
-                # Precio de mercado sin errores de 'mark_price'
+                # PRECIO MARK (CORRECTO)
                 res = c.futures_mark_price(symbol=sym)
                 m_p = float(res['markPrice'])
                 
@@ -33,30 +33,28 @@ def bot():
                 if roi > max_roi:
                     max_roi = roi
                 
-                # --- LÓGICA DE ESCALONES (El Trailing que no falla) ---
-                if max_roi >= 4.0:
-                    piso = max_roi - 0.5  # Si llegó a 4, el piso es 3.5
-                elif max_roi >= 3.0:
-                    piso = 2.5            # Si llegó a 3, el piso es 2.5
-                elif max_roi >= 2.5:
-                    piso = 2.0            # Si llegó a 2.5, el piso es 2.0 (EL MURO)
+                # --- LÓGICA RÍGIDA DE SALIDA ---
+                if max_roi >= 2.5:
+                    piso = max_roi - 0.5  # Trailing activo arriba de 2.5%
                 elif max_roi >= 2.0:
-                    piso = 2.0            # SE QUEDA CLAVADO EN 2.0 HASTA QUE LLEGUE A 2.5
+                    piso = 2.0            # Muro clavado en 2.0%
                 else:
                     piso = -4.0           # Stop Loss inicial
                 
-                # CIERRE RÍGIDO
+                # CIERRE DE POSICIÓN
                 if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"\n💰 CIERRE DE DIEZ: {roi:.2f}% | PISO: {piso:.2f}%")
+                    print(f"\n💰 CIERRE EJECUTADO EN: {roi:.2f}% | PISO: {piso:.2f}%")
                     
+                    # --- EL REINICIO CON ESPERA ---
                     max_roi = 0
                     piso = -4.0
-                    print("⏳ Enfriando 30 segundos...")
-                    time.sleep(30)
+                    print("⏳ ESPERA OBLIGATORIA DE 30 SEGUNDOS...")
+                    time.sleep(30) # Se duerme 30 segundos antes de volver al bucle
+                    continue # Salta al inicio del while para refrescar todo
                 
-                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}%", end='\r')
+                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}% | Saldo: {disponible:.2f}", end='\r')
 
             else:
                 max_roi = 0
@@ -71,11 +69,12 @@ def bot():
                         cant = round(((disponible * 0.90) * 5) / p_act, 1)
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"\n🚀 ENTRADA: {m} | CANT: {cant}")
                             break
-                print(f"🔍 BUSCANDO... | SALDO: {disponible:.2f} USDC", end='\r')
+                print(f"🔍 BUSCANDO ENTRADA... | SALDO: {disponible:.2f} USDC", end='\r')
 
         except Exception as e:
-            time.sleep(2)
+            time.sleep(5)
         time.sleep(2)
 
 if __name__ == "__main__":
