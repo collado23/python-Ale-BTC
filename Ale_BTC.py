@@ -3,13 +3,13 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     max_roi = 0
     piso = -4.0
 
-    print("🚀 V178 TOTAL | TRAILING 0.5% | ESPERA 30s ACTIVADA")
+    print("🚀 V178 DIEZ PUNTOS | TRAILING ESCALONADO | ESPERA 30s")
 
     while True:
         try:
@@ -24,6 +24,7 @@ def bot():
                 q = abs(float(activa['positionAmt']))
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
                 
+                # Precio de mercado sin errores de 'mark_price'
                 res = c.futures_mark_price(symbol=sym)
                 m_p = float(res['markPrice'])
                 
@@ -32,26 +33,30 @@ def bot():
                 if roi > max_roi:
                     max_roi = roi
                 
-                # TRAILING STOP ESCALONADO (Muro 2.0% + seguimiento)
-                if max_roi >= 2.5:
-                    piso = max_roi - 0.5
+                # --- LÓGICA DE ESCALONES (El Trailing que no falla) ---
+                if max_roi >= 4.0:
+                    piso = max_roi - 0.5  # Si llegó a 4, el piso es 3.5
+                elif max_roi >= 3.0:
+                    piso = 2.5            # Si llegó a 3, el piso es 2.5
+                elif max_roi >= 2.5:
+                    piso = 2.0            # Si llegó a 2.5, el piso es 2.0 (EL MURO)
                 elif max_roi >= 2.0:
-                    piso = 2.0
+                    piso = 2.0            # SE QUEDA CLAVADO EN 2.0 HASTA QUE LLEGUE A 2.5
                 else:
-                    piso = -4.0 
+                    piso = -4.0           # Stop Loss inicial
                 
+                # CIERRE RÍGIDO
                 if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"\n💰 CIERRE: {roi:.2f}% | PISO: {piso:.2f}%")
+                    print(f"\n💰 CIERRE DE DIEZ: {roi:.2f}% | PISO: {piso:.2f}%")
                     
-                    # RESET Y ESPERA DE 30 SEGUNDOS PARA LA PRÓXIMA
                     max_roi = 0
                     piso = -4.0
-                    print("⏳ Esperando 30 segundos para nueva operación...")
+                    print("⏳ Enfriando 30 segundos...")
                     time.sleep(30)
                 
-                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}% | Saldo: {disponible:.2f}", end='\r')
+                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}%", end='\r')
 
             else:
                 max_roi = 0
@@ -66,7 +71,6 @@ def bot():
                         cant = round(((disponible * 0.90) * 5) / p_act, 1)
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
-                            print(f"\n🚀 ENTRADA EN {m} | CANT: {cant}")
                             break
                 print(f"🔍 BUSCANDO... | SALDO: {disponible:.2f} USDC", end='\r')
 
