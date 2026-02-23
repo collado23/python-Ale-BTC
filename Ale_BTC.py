@@ -3,7 +3,8 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20}) 
+    # Mantenemos los timeouts altos para que Railway no se cuelgue
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20})
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     piso_memoria = {} 
@@ -19,11 +20,11 @@ def bot():
 
     while True:
         try:
-            # OBTENER SALDO DISPONIBLE SIEMPRE
+            # Pedimos el saldo disponible al principio para mostrarlo siempre
             acc = c.futures_account(recvWindow=10000)
             disponible = float(acc['availableBalance'])
 
-            # 1. VERIFICAR POSICIONES
+            # 1. VERIFICAR POSICIONES ABIERTAS
             pos_info = c.futures_position_information(recvWindow=10000)
             activa = None
             for p in pos_info:
@@ -33,7 +34,7 @@ def bot():
                               'p':float(p['entryPrice']), 'q':abs(amt), 'x':int(p.get('leverage', 5))}
                     break
 
-            # 2. GESTIÓN SI HAY OPERACIÓN
+            # 2. GESTIÓN SI HAY OPERACIÓN (TRAILING 0.5% DESDE EL 2.5%)
             if activa:
                 m_p = float(c.futures_mark_price(symbol=activa['s'])['markPrice'])
                 diff = (m_p - activa['p'])/activa['p'] if activa['l']=="LONG" else (activa['p'] - m_p)/activa['p']
@@ -53,10 +54,10 @@ def bot():
                     piso_memoria = {}; ultimo_cierre_ts = time.time()
                     time.sleep(15)
                 else:
-                    # ACÁ AGREGUÉ EL SALDO PARA QUE LO VEAS MIENTRAS OPERA
+                    # ACÁ SE MUESTRA EL SALDO MIENTRAS OPERA
                     print(f"💰 ${disponible:.2f} | {activa['s']} | ROI: {roi:.2f}% | PISO: {piso_memoria[activa['s']]:.2f}%", end='\r')
 
-            # 3. ENTRADA AL 90%
+            # 3. SI NO HAY NADA: BUSCAR ENTRADA (90% CAPITAL)
             elif esta_en_horario():
                 if time.time() - ultimo_cierre_ts < 120:
                     print(f"⏳ ${disponible:.2f} | Enfriamiento...", end='\r')
@@ -78,13 +79,13 @@ def bot():
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                         prec = 0 if 'XRP' in m else (1 if 'SOL' in m else 2)
                         
-                        # CAPITAL AL 90%
+                        # CAPITAL AL 90% DEL DISPONIBLE
                         cant = round(((disponible * 0.90) * 5) / p_act, prec)
 
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=SIDE_BUY if dir_e=='LONG' else SIDE_SELL, 
                                                  type=ORDER_TYPE_MARKET, quantity=cant, recvWindow=10000)
-                            print(f"\n🎯 DISPARO {dir_e} EN {m} - Capital: ${disponible:.2f}")
+                            print(f"\n🎯 DISPARO {dir_e} EN {m} - Saldo: ${disponible:.2f}")
                             time.sleep(30); break
                 
                 print(f"💰 ${disponible:.2f} | Acechando... {datetime.datetime.now().strftime('%H:%M:%S')}", end='\r')
@@ -92,6 +93,7 @@ def bot():
                 print(f"💰 ${disponible:.2f} | Fuera de horario", end='\r')
 
         except Exception as e:
+            # En caso de error, espera y sigue, no se tilda
             time.sleep(15)
         time.sleep(10)
 
