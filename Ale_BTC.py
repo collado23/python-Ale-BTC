@@ -3,18 +3,21 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     max_roi = 0
     piso = -4.0
 
-    print("🚀 V178 - SISTEMA DE MONITOREO ACTIVADO")
+    print("🚀 V178 ACTIVADO - ENGANCHANDO OPERACIÓN...")
 
     while True:
         try:
+            # 1. ACTUALIZA SALDO
             acc = c.futures_account()
             disponible = next((float(b['availableBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
+            
+            # 2. BUSCA OPERACIÓN ABIERTA (ENGANCHE)
             pos = c.futures_position_information()
             activa = next((p for p in pos if float(p.get('positionAmt', 0)) != 0), None)
 
@@ -24,15 +27,17 @@ def bot():
                 q = abs(float(activa['positionAmt']))
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
                 
-                # CORRECCIÓN DE MARK_PRICE: Ahora sí lee el precio correctamente
-                m_p_data = c.futures_mark_price(symbol=sym)
-                m_p = float(m_p_data['markPrice'])
+                # PRECIO DE MERCADO (CORREGIDO PARA QUE NO TIRE ERROR)
+                res = c.futures_mark_price(symbol=sym)
+                m_p = float(res['markPrice'])
                 
+                # ROI con x5
                 roi = ((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * 100 * 5 
                 
                 if roi > max_roi:
                     max_roi = roi
                 
+                # MURO 2.0%
                 if max_roi >= 2.0:
                     piso = max(2.0, max_roi - 0.5)
                 else:
@@ -41,14 +46,16 @@ def bot():
                 if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"\n💰 CIERRE: {roi:.2f}% | PISO: {piso:.2f}%")
+                    print(f"\n💰 CIERRE EN: {roi:.2f}% | PISO: {piso:.2f}%")
                     max_roi = 0
                     piso = -4.0
                     time.sleep(30)
                 
-                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}%", end='\r')
+                # ESTA LÍNEA TE MUESTRA TU MONEDA OPERANDO
+                print(f"📊 {sym} (OPERANDO) | ROI: {roi:.2f}% | PISO: {piso:.2f}% | SALDO: {disponible:.2f}", end='\r')
 
             else:
+                # SI NO HAY NADA, BUSCA ENTRADA
                 max_roi = 0
                 piso = -4.0
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
@@ -61,11 +68,14 @@ def bot():
                         cant = round(((disponible * 0.90) * 5) / p_act, 1)
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"\n🚀 ENTRADA EN {m} | CANT: {cant}")
                             break
                 
-                print(f"🔍 BUSCANDO... | SALDO: {disponible:.2f} USDC", end='\r')
+                # ESTA LÍNEA TE MUESTRA QUE EL BOT ESTÁ BUSCANDO
+                print(f"🔍 BUSCANDO ENTRADA... | SALDO: {disponible:.2f} USDC", end='\r')
 
         except Exception as e:
+            # SI HAY ERROR, TE AVISA QUÉ PASÓ
             print(f"\n⚠️ Log: {e}")
             time.sleep(5)
         
