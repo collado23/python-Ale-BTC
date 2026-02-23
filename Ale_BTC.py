@@ -4,7 +4,7 @@ from binance.enums import *
 
 def bot():
     # Mantenemos los timeouts altos para que Railway no se cuelgue
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20})
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"), {"timeout": 20}) 
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     piso_memoria = {} 
