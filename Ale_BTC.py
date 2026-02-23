@@ -3,7 +3,7 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
     ops_piso = {} 
 
     def esta_en_horario():
