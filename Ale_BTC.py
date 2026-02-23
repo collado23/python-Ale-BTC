@@ -3,14 +3,14 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
-    # MEMORIA DEL BOT (No se borra mientras la operacion siga abierta)
+    # Estas variables se quedan fijas para que no "pelotudee" el piso
     max_roi = 0
     piso = -4.0
 
-    print("🚀 V178 FIX | MURO 2.0% SIN VUELTAS")
+    print("🚀 V178 FIX FINAL | MURO 2.0% SIN CIERRES PREMATUROS")
 
     while True:
         try:
@@ -26,27 +26,28 @@ def bot():
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
                 m_p = float(c.futures_mark_price(symbol=sym)['mark_price'])
                 
+                # ROI con x5 exacto
                 roi = ((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * 100 * 5 
                 
-                # ACTUALIZA EL MÁXIMO (MEMORIA)
+                # MEMORIA: Solo sube, nunca baja
                 if roi > max_roi:
                     max_roi = roi
                 
-                # LÓGICA DEL MURO 2.0%
+                # EL MURO QUE PEDISTE:
                 if max_roi >= 2.0:
-                    # Si el trailing (max-0.5) es menor a 2, se queda en 2. 
-                    # Si es mayor, sube. NUNCA baja de lo que ya subio.
-                    nuevo_piso = max(2.0, max_roi - 0.5)
-                    if nuevo_piso > piso:
-                        piso = nuevo_piso
+                    # Una vez que toca 2.0, el piso nunca mas es menor a 2.0
+                    # Si sube a 3.0, el piso sube a 2.5. Si baja, se queda en 2.5.
+                    piso = max(2.0, max_roi - 0.5)
                 else:
+                    # SI NO TOCO EL 2%, EL PISO ES -4.0 CLAVADO. 
+                    # No te va a cerrar en -0.50% nunca mas.
                     piso = -4.0 
                 
-                # CIERRE REAL
+                # CIERRE FINAL
                 if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"💰 CIERRE EN: {roi:.2f}% | PISO FINAL: {piso:.2f}%")
+                    print(f"💰 CIERRE: {roi:.2f}% | PISO: {piso:.2f}%")
                     max_roi = 0
                     piso = -4.0
                     time.sleep(30)
