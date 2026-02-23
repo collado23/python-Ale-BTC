@@ -3,13 +3,14 @@ from binance.client import Client
 from binance.enums import *
 
 def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     max_roi = 0
     piso = -4.0
+    hubo_posicion = False # Nueva variable para detectar cierres manuales
 
-    print("🚀 V181 | TRAILING 0.3% | ESPERA 30s GARANTIZADA")
+    print("🚀 V182 | ESPERA TOTAL 30s (Manual o Auto) | TRAILING 0.3%")
 
     while True:
         try:
@@ -19,6 +20,7 @@ def bot():
             activa = next((p for p in pos if float(p.get('positionAmt', 0)) != 0), None)
 
             if activa:
+                hubo_posicion = True # El bot sabe que hay algo abierto
                 sym = activa['symbol']
                 entry = float(activa['entryPrice'])
                 q = abs(float(activa['positionAmt']))
@@ -32,31 +34,33 @@ def bot():
                 if roi > max_roi:
                     max_roi = roi
                 
-                # --- TRAILING ESTRECHO 0.3% ---
+                # TRAILING 0.3%
                 if max_roi >= 2.3:
-                    piso = max_roi - 0.3  # Si llega a 2.3, el piso es 2.0. Si llega a 3.0, el piso es 2.7.
+                    piso = max_roi - 0.3
                 elif max_roi >= 2.0:
-                    piso = 2.0            # Muro inicial
+                    piso = 2.0
                 else:
-                    piso = -4.0           # Stop Loss
+                    piso = -4.0 
                 
                 if roi <= piso:
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"\n💰 CIERRE: {roi:.2f}% | PISO: {piso:.2f}%")
-                    
-                    # RESET Y ESPERA REAL
-                    max_roi = 0
-                    piso = -4.0
-                    print("⏳ ESPERA DE 30 SEGUNDOS ACTIVADA...")
-                    time.sleep(30) 
-                    continue # Salta al inicio del bucle para asegurar la limpieza
-
+                    print(f"\n💰 CIERRE AUTO: {roi:.2f}%")
+                    # No pongo el sleep acá, dejo que lo haga abajo
+                
                 print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}%", end='\r')
 
             else:
-                max_roi = 0
-                piso = -4.0
+                # SI NO HAY POSICIÓN PERO HACE UN SEGUNDO SÍ HABÍA (Cierre manual o auto)
+                if hubo_posicion:
+                    print("\n⏳ POSICIÓN CERRADA. Iniciando pausa de 30 segundos...")
+                    time.sleep(30)
+                    hubo_posicion = False # Reseteamos para que no vuelva a dormir
+                    max_roi = 0
+                    piso = -4.0
+                    continue
+
+                # BUSCADOR DE ENTRADAS
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl, e9, e27 = float(k[-2][4]), sum(float(x[4]) for x in k[-9:])/9, sum(float(x[4]) for x in k[-27:])/27
