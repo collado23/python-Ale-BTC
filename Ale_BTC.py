@@ -7,7 +7,7 @@ def bot():
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     piso_memoria = {} 
-    ultimo_cierre_ts = 0 
+    ultimo_cierre_ts = 0
 
     def esta_en_horario():
         tz_arg = datetime.timezone(datetime.timedelta(hours=-3))
@@ -15,10 +15,15 @@ def bot():
         h = ahora.hour + ahora.minute/60
         return (11.0 <= h <= 18.0) or (h >= 22.5 or h <= 6.0)
 
-    print("🛡️ V174 | ESTRATEGIA OPTIMIZADA | FILTRO DE VOLUMEN | TRAILING INTELIGENTE")
+    print("🚀 V175 | SALDO VISIBLE | 90% CAPITAL | EMAs 9/27")
 
     while True:
         try:
+            # OBTENER SALDO DISPONIBLE SIEMPRE
+            acc = c.futures_account(recvWindow=10000)
+            disponible = float(acc['availableBalance'])
+
+            # 1. VERIFICAR POSICIONES
             pos_info = c.futures_position_information(recvWindow=10000)
             activa = None
             for p in pos_info:
@@ -28,6 +33,7 @@ def bot():
                               'p':float(p['entryPrice']), 'q':abs(amt), 'x':int(p.get('leverage', 5))}
                     break
 
+            # 2. GESTIÓN SI HAY OPERACIÓN
             if activa:
                 m_p = float(c.futures_mark_price(symbol=activa['s'])['markPrice'])
                 diff = (m_p - activa['p'])/activa['p'] if activa['l']=="LONG" else (activa['p'] - m_p)/activa['p']
@@ -35,11 +41,8 @@ def bot():
 
                 if activa['s'] not in piso_memoria: piso_memoria[activa['s']] = -4.0
 
-                # MEJORA: Trailing más flexible
                 if roi >= 2.5:
-                    # Si la ganancia es baja, le damos 0.8% de aire. Si es alta (>10%), cerramos a 0.5%
-                    distancia = 0.8 if roi < 10 else 0.5
-                    nuevo_piso = roi - distancia
+                    nuevo_piso = roi - 0.5
                     if nuevo_piso > piso_memoria[activa['s']]:
                         piso_memoria[activa['s']] = nuevo_piso
                 
@@ -50,14 +53,14 @@ def bot():
                     piso_memoria = {}; ultimo_cierre_ts = time.time()
                     time.sleep(15)
                 else:
-                    print(f"💰 {activa['s']} | ROI: {roi:.2f}% | PISO: {piso_memoria[activa['s']]:.2f}%", end='\r')
+                    # ACÁ AGREGUÉ EL SALDO PARA QUE LO VEAS MIENTRAS OPERA
+                    print(f"💰 ${disponible:.2f} | {activa['s']} | ROI: {roi:.2f}% | PISO: {piso_memoria[activa['s']]:.2f}%", end='\r')
 
+            # 3. ENTRADA AL 90%
             elif esta_en_horario():
                 if time.time() - ultimo_cierre_ts < 120:
+                    print(f"⏳ ${disponible:.2f} | Enfriamiento...", end='\r')
                     time.sleep(10); continue
-
-                acc = c.futures_account(recvWindow=10000)
-                disponible = float(acc['availableBalance'])
 
                 for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=50)
@@ -66,7 +69,6 @@ def bot():
                     e27 = sum([float(x[4]) for x in k[-27:]])/27
                     e9_ant = sum([float(x[4]) for x in k[-10:-1]])/9
 
-                    # FILTRO DE ENTRADA: Precio > EMA9 > EMA27 + Fuerza
                     dir_e = None
                     if cl > e9 and e9 > e27 and e9 > e9_ant: dir_e = 'LONG'
                     elif cl < e9 and e9 < e27 and e9 < e9_ant: dir_e = 'SHORT'
@@ -75,16 +77,19 @@ def bot():
                         c.futures_change_leverage(symbol=m, leverage=5)
                         p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
                         prec = 0 if 'XRP' in m else (1 if 'SOL' in m else 2)
-                        # Usamos 85% para mayor seguridad de margen
-                        cant = round(((disponible * 0.85) * 5) / p_act, prec)
+                        
+                        # CAPITAL AL 90%
+                        cant = round(((disponible * 0.90) * 5) / p_act, prec)
 
                         if cant > 0:
                             c.futures_create_order(symbol=m, side=SIDE_BUY if dir_e=='LONG' else SIDE_SELL, 
                                                  type=ORDER_TYPE_MARKET, quantity=cant, recvWindow=10000)
-                            print(f"\n🎯 DISPARO {dir_e} EN {m}")
+                            print(f"\n🎯 DISPARO {dir_e} EN {m} - Capital: ${disponible:.2f}")
                             time.sleep(30); break
+                
+                print(f"💰 ${disponible:.2f} | Acechando... {datetime.datetime.now().strftime('%H:%M:%S')}", end='\r')
             else:
-                piso_memoria = {}; print(f"💰 Acechando... {datetime.datetime.now().strftime('%H:%M:%S')}", end='\r')
+                print(f"💰 ${disponible:.2f} | Fuera de horario", end='\r')
 
         except Exception as e:
             time.sleep(15)
