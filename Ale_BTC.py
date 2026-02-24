@@ -1,23 +1,17 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
-# Variables globales blindadas
-info_op = {"activo": False, "sym": "", "side": "", "roi": 0.0, "pico": 0.0, "piso": 0.0, "capital": 0.0, "entrada": 0.0}
+# Memoria para el Dashboard Multi-Operación
+ops_activas = {} # Estructura: { symbol: {info} }
 
-def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
-    global info_op
-    info_op["activo"] = True
-    info_op["sym"] = sym
-    info_op["side"] = "COMPRA (LONG)" if side == "LONG" else "VENTA (SHORT)"
-    info_op["entrada"] = entry
-    info_op["pico"] = 0.0
-    
-    # METAS ESTRICTAS
+def vigilante_individual(c, sym, side, q, entry, palanca, comision, stop_loss):
+    global ops_activas
+    pico = 0.0
     gatillo_trailing = 1.20 
     margen_pegado = 0.05
 
-    while info_op["activo"]:
+    while sym in ops_activas:
         try:
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
@@ -25,91 +19,96 @@ def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
             diff = (m_p - entry) if side == "LONG" else (entry - m_p)
             roi = ((diff / entry) * palanca - comision) * 100
             
-            if roi > info_op["pico"]:
-                info_op["pico"] = roi
+            if roi > pico: pico = roi
             
-            info_op["roi"] = roi
-            # Solo calcula piso si pasó el 1.20%
-            info_op["piso"] = info_op["pico"] - margen_pegado if info_op["pico"] >= gatillo_trailing else -99.0
+            piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
+            
+            # Actualizar datos para el Dashboard
+            if sym in ops_activas:
+                ops_activas[sym].update({"roi": roi, "pico": pico, "piso": piso})
 
-            # GATILLO DE CIERRE: Solo por Meta o por Stop Loss
-            if (info_op["pico"] >= gatillo_trailing and roi <= info_op["piso"]) or (roi <= stop_loss):
+            # CIERRE POR META O STOP LOSS
+            if (pico >= gatillo_trailing and roi <= piso) or (roi <= stop_loss):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"\n✅ CIERRE EJECUTADO: {roi:.2f}%")
-                info_op["activo"] = False
+                print(f"\n✅ CIERRE EN {sym}: {roi:.2f}%")
+                if sym in ops_activas: del ops_activas[sym]
                 break 
             
-            time.sleep(0.1) 
+            time.sleep(0.1) # Reacción ultra rápida
         except:
-            time.sleep(1)
+            time.sleep(0.5)
 
-def bot_quantum_v6_blindado():
+def bot_quantum_v10_doble_op():
     api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
-    
     c = Client(api_key, api_secret)
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
-    palanca, monedas = 5, ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
-    stop_loss = -3.0
+    monedas = ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
+    palanca, stop_loss = 5, -4.0
+    max_ops = 2 
 
-    print("🚀 ALE IA QUANTUM - V6 BLINDADA (META 1.20%)")
+    print(f"🚀 ALE IA QUANTUM V10 | DOBLE OPERACIÓN (90% TOTAL)")
 
     while True:
         try:
             acc = c.futures_account()
             disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             
+            # Revisar posiciones reales
             pos = c.futures_position_information()
-            activas = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
+            reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
+            
+            # Limpiar memoria de ops cerradas manualmente si las hubiera
+            simbolos_reales = [r['symbol'] for r in reales]
+            for s in list(ops_activas.keys()):
+                if s not in simbolos_reales: del ops_activas[s]
 
-            if len(activas) > 0:
-                # Si hay operación, SOLO mostramos el Dashboard y dejamos que el vigilante trabaje
-                for a in activas:
-                    if not info_op["activo"]:
-                        sym, q, entry = a['symbol'], abs(float(a['positionAmt'])), float(a['entryPrice'])
-                        side_in = "LONG" if float(a['positionAmt']) > 0 else "SHORT"
-                        info_op["capital"] = (q * entry) / palanca
-                        threading.Thread(target=vigilante_blindado, args=(c, sym, side_in, q, entry, palanca, 0.001, stop_loss), daemon=True).start()
+            # --- DASHBOARD ---
+            print("\n" + "💎" * 15)
+            print(f"💰 SALDO DISP: {disp:.2f} USDC | ACTIVAS: {len(reales)}/{max_ops}")
+            
+            for r in reales:
+                s = r['symbol']
+                if s not in ops_activas:
+                    side_in = "LONG" if float(r['positionAmt']) > 0 else "SHORT"
+                    q, ent = abs(float(r['positionAmt'])), float(r['entryPrice'])
+                    ops_activas[s] = {"roi": 0, "pico": 0, "piso": -99, "side": side_in}
+                    threading.Thread(target=vigilante_individual, args=(c, s, side_in, q, ent, palanca, 0.001, stop_loss), daemon=True).start()
                 
-                print("\n" + "💎" * 15)
-                print(f"💰 DISP: {disp:.2f} USDC | {info_op['side']}")
-                print(f"🔥 MONEDA: {info_op['sym']} | ROI: {info_op['roi']:.2f}%")
-                print(f"🔝 MAX: {info_op['pico']:.2f}% | PISO: {info_op['piso']:.2f}%")
-                print("-" * 30)
-                time.sleep(2)
+                info = ops_activas.get(s, {})
+                print(f"🔥 {s} ({info.get('side','?')}) | ROI: {info.get('roi',0):.2f}% | MAX: {info.get('pico',0):.2f}%")
 
-            else:
-                # Si no hay operación, limpiamos info y buscamos
-                info_op["activo"] = False
-                print(f"📡 BUSCANDO SEÑAL... | SALDO: {disp:.2f} USDC", end='\r')
-                
+            # --- LÓGICA DE ENTRADA ---
+            if len(reales) < max_ops:
+                print(f"📡 RADAR BUSCANDO HUECO... {(max_ops - len(reales))} DISPONIBLE", end='\r')
                 for m in monedas:
+                    if any(m == r['symbol'] for r in reales): continue
+                    
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     e27_ant = sum(cl[-29:-2])/27
                     
-                    if (cl[-1] > e9 > e27) and (e27 > e27_ant):
-                        side_order = SIDE_BUY
-                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant):
-                        side_order = SIDE_SELL
+                    if (cl[-1] > e9 > e27) and (e27 > e27_ant): side_order = SIDE_BUY
+                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant): side_order = SIDE_SELL
                     else: continue
 
-                    # Interés compuesto al 90%
-                    monto = disp * 0.90
+                    # 45% del capital por operación para poder abrir dos
+                    monto = disp * 0.45 
                     decs = 0 if m in ['DOGEUSDC', 'TRXUSDC'] else 1
                     cant = round((monto * palanca) / cl[-1], decs)
                     
                     if (cant * cl[-1]) >= 5.0:
                         c.futures_change_leverage(symbol=m, leverage=palanca)
                         c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        print(f"\n🎯 ENTRADA EN {m}!")
-                        time.sleep(10)
+                        print(f"\n🎯 DISPARO EN {m}!")
+                        time.sleep(5)
                         break
         except Exception as e:
-            time.sleep(5)
+            print(f"⚠️ Error: {e}")
+            time.sleep(2)
         time.sleep(1)
 
 if __name__ == "__main__":
-    bot_quantum_v6_blindado()
+    bot_quantum_v10_doble_op()
