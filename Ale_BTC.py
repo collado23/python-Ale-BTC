@@ -2,7 +2,7 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria para el Dashboard Multi-Operación
+# Memoria para el Dashboard Multi-Operación 
 ops_activas = {} # Estructura: { symbol: {info} }
 
 def vigilante_individual(c, sym, side, q, entry, palanca, comision, stop_loss):
