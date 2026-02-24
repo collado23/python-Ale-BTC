@@ -13,6 +13,10 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
     info_op["entrada"] = entry
     info_op["pico"] = 0.0
     
+    # AJUSTE SOLICITADO
+    gatillo_trailing = 1.20 
+    margen_pegado = 0.05
+
     while info_op["activo"]:
         try:
             res = c.futures_mark_price(symbol=sym)
@@ -24,12 +28,12 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
             if roi > info_op["pico"]:
                 info_op["pico"] = roi
             
-            # Margen de 0.05% desde el gatillo 1.05%
+            # El piso ahora se activa recién al 1.20%
             info_op["roi"] = roi
-            info_op["piso"] = info_op["pico"] - 0.05 if info_op["pico"] >= 1.05 else -99.0
+            info_op["piso"] = info_op["pico"] - margen_pegado if info_op["pico"] >= gatillo_trailing else -99.0
 
             # CIERRE INSTANTÁNEO
-            if (info_op["pico"] >= 1.05 and roi <= info_op["piso"]) or (roi <= stop_loss):
+            if (info_op["pico"] >= gatillo_trailing and roi <= info_op["piso"]) or (roi <= stop_loss):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
                 print(f"\n✅ CIERRE EJECUTADO EN {sym} A {roi:.2f}%")
                 info_op["activo"] = False
@@ -40,17 +44,21 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
             info_op["activo"] = False
             break
 
-def bot_quantum_v4_inclination():
+def bot_quantum_v4_final_120():
     api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
     
+    if not api_key:
+        print("❌ Error: Faltan las API KEYS en Railway.")
+        return
+
     c = Client(api_key, api_secret)
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     palanca, monedas = 5, ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
     comision, stop_loss = 0.001, -3.0
 
-    print("🚀 ALE IA QUANTUM - MODO CIRUGÍA CON FILTRO DE TENDENCIA")
+    print("🚀 ALE IA QUANTUM - GATILLO 1.20% ACTIVADO")
 
     while True:
         try:
@@ -61,7 +69,6 @@ def bot_quantum_v4_inclination():
             activas = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
 
             if len(activas) > 0:
-                # --- DASHBOARD DE OPERACIÓN ACTIVA ---
                 for a in activas:
                     sym = a['symbol']
                     q = abs(float(a['positionAmt']))
@@ -81,38 +88,30 @@ def bot_quantum_v4_inclination():
                 print("-" * 30)
 
             else:
-                # --- RADAR CON FILTRO DE INCLINACIÓN ---
                 print(f"📡 RADAR BUSCANDO TENDENCIA... | SALDO: {disp:.2f}", end='\r')
                 for m in monedas:
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     
-                    # Cálculo de medias actuales
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
-                    # Cálculo de la media 27 de hace 2 minutos para ver la dirección
                     e27_anterior = sum(cl[-29:-2])/27
                     
-                    # FILTRO: Para comprar, la media amarilla (27) debe estar apuntando hacia arriba
                     tendencia_sube = e27 > e27_anterior
-                    # FILTRO: Para vender, la media amarilla (27) debe estar apuntando hacia abajo
                     tendencia_baja = e27 < e27_anterior
 
-                    # Lógica de entrada
                     if (cl[-1] > e9 > e27) and tendencia_sube:
                         side_order = SIDE_BUY
                     elif (cl[-1] < e9 < e27) and tendencia_baja:
                         side_order = SIDE_SELL
-                    else:
-                        continue # Si no hay tendencia clara, saltamos a la siguiente moneda
+                    else: continue
 
-                    # Gestión de capital (Interés compuesto 90% para cuentas pequeñas)
                     monto = disp * 0.90 if (disp * palanca) < 5.1 else disp * 0.20
                     cant = round((monto * palanca) / cl[-1], 0 if m in ['DOGEUSDC', 'TRXUSDC'] else 1)
                     
                     if (cant * cl[-1]) >= 5.0:
                         c.futures_change_leverage(symbol=m, leverage=palanca)
                         c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        print(f"\n🎯 ENGANCHE: {m} | DIRECCIÓN: {side_order}")
+                        print(f"\n🎯 ENGANCHE: {m}")
                         time.sleep(5)
                         break
 
@@ -123,4 +122,4 @@ def bot_quantum_v4_inclination():
         time.sleep(2)
 
 if __name__ == "__main__":
-    bot_quantum_dashboard_final()
+    bot_quantum_v4_final_120()
