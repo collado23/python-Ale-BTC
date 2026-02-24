@@ -2,7 +2,7 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de operaciones - PROTEGIDA
+# Memoria de operaciones - PROTEGIDA 
 ops_activas = {} 
 
 def vigilante_acero(c, sym, side, q, entry, palanca, comision, stop_loss):
