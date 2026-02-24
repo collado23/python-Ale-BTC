@@ -1,88 +1,90 @@
 import os, time, threading
 from binance.client import Client
 from binance.enums import *
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# --- SERVIDOR DE SALUD ---
-class HealthCheck(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+# Memoria de picos para el Trailing
+picos_maximos = {}
 
-def run_health_server():
-    try: HTTPServer(('0.0.0.0', int(os.getenv("PORT", 8080))), HealthCheck).serve_forever()
-    except: pass
+def vigilante_instantaneo(c, sym, side, q, entry, palanca, comision, stop_loss):
+    """ Este hilo solo mira el precio y cierra a la velocidad del rayo """
+    global picos_maximos
+    picos_maximos[sym] = 0.0
+    print(f"⚡ VIGILANTE ACTIVADO PARA {sym}")
 
-max_rois = {}
+    while True:
+        try:
+            # Pedimos solo el precio (Mark Price es el más rápido para futuros)
+            m_p = float(c.futures_mark_price(symbol=sym)['markPrice'])
+            
+            # Cálculo de ROI Neto
+            diff = (m_p - entry) if side == "LONG" else (entry - m_p)
+            roi = ((diff / entry) * palanca - comision) * 100
+            
+            if roi > picos_maximos[sym]:
+                picos_maximos[sym] = roi
+            
+            # PISO: 1.05% de gatillo, con 0.3% de margen (o 0.2% si quieres más pegado)
+            piso = picos_maximos[sym] - 0.3 if picos_maximos[sym] >= 1.05 else -99.0
 
-def bot_quantum_antibucle():
-    threading.Thread(target=run_health_server, daemon=True).start()
+            # GATILLO DE CIERRE AL TOQUE
+            if (picos_maximos[sym] >= 1.05 and roi <= piso) or (roi <= stop_loss):
+                c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
+                print(f"\n🚀 CIERRE INSTANTÁNEO EN {sym} | ROI: {roi:.2f}%")
+                if sym in picos_maximos: del picos_maximos[sym]
+                break 
+            
+            time.sleep(0.2) # Vigilancia extrema: 5 veces por segundo
+        except Exception:
+            break
+
+def bot_quantum_flash():
     c = Client(os.getenv("API_KEY"), os.getenv("API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     palanca, monedas = 5, ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
-    comision, descanso_corto, stop_loss = 0.001, 30, -4.0
-
-    print("🚀 ALE IA QUANTUM - MODO ANTIBUCLE ACTIVADO")
+    comision, stop_loss = 0.001, -3.0 # Bajamos Stop Loss a -3% por seguridad
 
     while True:
         try:
             acc = c.futures_account()
-            disponible = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
-            total_wallet = float(acc['totalWalletBalance'])
+            disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             
             pos = c.futures_position_information()
-            activas_info = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
-            n_activas = len(activas_info)
+            activas = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
 
-            # --- DASHBOARD ---
-            print(f"\n💰 TOTAL: {total_wallet:.4f} | DISP: {disponible:.4f} | OPS: {n_activas}/2")
-
-            if n_activas > 0:
-                for activa in activas_info:
-                    sym = activa['symbol']
-                    q, entry = abs(float(activa['positionAmt'])), float(activa['entryPrice'])
-                    side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
-                    m_p = float(c.futures_mark_price(symbol=sym)['mark_price'])
-                    
-                    roi_pct = ((((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * palanca) - comision) * 100
-                    if sym not in max_rois: max_rois[sym] = roi_pct
-                    if roi_pct > max_rois[sym]: max_rois[sym] = roi_pct
-                    
-                    piso = max_rois[sym] - 0.3 if max_rois[sym] >= 1.05 else -99.0
-                    print(f"📈 {sym} | ROI: {roi_pct:.2f}% | MAX: {max_rois[sym]:.2f}%")
-
-                    if (max_rois[sym] >= 1.05 and roi_pct <= piso) or (roi_pct <= stop_loss):
-                        c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                        print(f"✅ CIERRE EN {sym}")
-                        if sym in max_rois: del max_rois[sym]
-                        
-                        # Si cerramos con pérdida o ROI bajo, damos descanso largo para romper el bucle
-                        descanso = 300 if roi_pct < 0.5 else descanso_corto
-                        for i in range(descanso, 0, -1):
-                            print(f"⏳ FILTRO ANTIBUCLE: Esperando {i}s...", end='\r'); time.sleep(1)
-                        break
-
-            else:
+            if len(activas) == 0:
+                print(f"📡 BUSCANDO... | SALDO: {disp:.2f}", end='\r')
                 for m in monedas:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
-                    # FILTRO DE SEPARACIÓN (Evita el enredo de líneas)
-                    separacion = abs(e9 - e27) / e27 * 100
-                    
-                    if separacion > 0.05: # Solo entra si hay una tendencia clara
-                        if (cl[-1] > e9 > e27) or (cl[-1] < e9 < e27):
-                            side_in = SIDE_BUY if cl[-1] > e9 else SIDE_SELL
-                            monto_op = disponible * 0.90 if (disponible * palanca) < 5.1 else disponible * 0.20
-                            cant = round((monto_op * palanca) / cl[-1], 0 if m in ['DOGEUSDC', 'TRXUSDC'] else 1)
+                    if (cl[-1] > e9 > e27) or (cl[-1] < e9 < e27):
+                        side_in = SIDE_BUY if cl[-1] > e9 else SIDE_SELL
+                        # Usamos 90% para cuentas chicas para llegar al mínimo de 5 USDC
+                        monto = disp * 0.90 if (disp * palanca) < 5.1 else disp * 0.20
+                        cant = round((monto * palanca) / cl[-1], 0 if m in ['DOGEUSDC', 'TRXUSDC'] else 1)
+                        
+                        if (cant * cl[-1]) >= 5.0:
+                            c.futures_change_leverage(symbol=m, leverage=palanca)
+                            c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
                             
-                            if (cant * cl[-1]) >= 5.0:
-                                c.futures_change_leverage(symbol=m, leverage=palanca)
-                                c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
-                                print(f"🎯 ENTRADA EN {m} | SEPARACIÓN: {separacion:.4f}%")
-                                break
+                            # LANZAMOS AL VIGILANTE EN OTRO HILO
+                            threading.Thread(target=vigilante_instantaneo, 
+                                             args=(c, m, ("LONG" if side_in==SIDE_BUY else "SHORT"), cant, cl[-1], palanca, comision, stop_loss),
+                                             daemon=True).start()
+                            
+                            # Esperamos el descanso de 30s mientras el vigilante trabaja
+                            for i in range(30, 0, -1):
+                                print(f"⏳ DESCANSO POST-COMPRA: {i}s...", end='\r')
+                                time.sleep(1)
+                            break
+            else:
+                # El vigilante ya está trabajando en su propio hilo, aquí solo esperamos
+                time.sleep(2)
 
         except Exception as e:
-            print(f"⚠️ Error: {e}"); time.sleep(10)
-        time.sleep(2)
+            time.sleep(5)
+
+if __name__ == "__main__":
+    bot_quantum_flash()
