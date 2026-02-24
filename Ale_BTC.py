@@ -5,7 +5,7 @@ from binance.enums import *
 # Memoria de picos para el Trailing
 picos_maximos = {}
 
-def vigilante_instantaneo(c, sym, side, q, entry, palanca, comision, stop_loss):
+def vigilante_instantaneo(c, sym, side, q, entry, palanca, comision, stop_loss): 
     """ Este hilo solo mira el precio y cierra a la velocidad del rayo """
     global picos_maximos
     picos_maximos[sym] = 0.0
