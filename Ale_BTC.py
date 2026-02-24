@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client
+from binance.client import Client 
 from binance.enums import *
 
 # Variables globales para que el Dashboard vea lo que hace el Vigilante
