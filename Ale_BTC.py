@@ -2,10 +2,10 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de picos para el Trailing
+# Memoria de picos
 picos_maximos = {}
 
-def vigilante_ultra_pegado(c, sym, side, q, entry, palanca, comision, stop_loss): 
+def vigilante_ultra_pegado(c, sym, side, q, entry, palanca, comision, stop_loss):
     global picos_maximos
     picos_maximos[sym] = 0.0
     margen_trailing = 0.05 
@@ -33,25 +33,31 @@ def vigilante_ultra_pegado(c, sym, side, q, entry, palanca, comision, stop_loss)
                 break 
             
             time.sleep(0.1) 
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Error Vigilante: {e}")
             break
 
-def bot_quantum_final():
-    # USAMOS LOS NOMBRES QUE PROBABLEMENTE TIENES EN RAILWAY
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET")
+def bot_quantum_definitivo():
+    # Buscamos las llaves con ambos nombres posibles para que no se frene
+    api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
+    api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
     
     if not api_key or not api_secret:
-        print("❌ ERROR: No se encontraron las llaves API en Variables de Entorno.")
+        print("❌ ERROR CRÍTICO: No se detectan las API KEYS en Railway. Revisa la pestaña 'Variables'.")
         return
 
-    c = Client(api_key, api_secret)
-    c.API_URL = 'https://fapi.binance.com/fapi/v1'
-    
+    try:
+        c = Client(api_key, api_secret)
+        c.API_URL = 'https://fapi.binance.com/fapi/v1'
+        print("✅ CONEXIÓN EXITOSA CON BINANCE")
+    except Exception as e:
+        print(f"❌ FALLO DE AUTENTICACIÓN: {e}")
+        return
+
     palanca, monedas = 5, ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
     comision, stop_loss = 0.001, -3.0 
 
-    print("🚀 ALE IA QUANTUM - MODO CIRUGÍA ONLINE")
+    print("🚀 ALE IA QUANTUM - ESCANEANDO MONEDAS BARATAS...")
 
     while True:
         try:
@@ -62,7 +68,7 @@ def bot_quantum_final():
             activas = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
 
             if len(activas) == 0:
-                print(f"📡 ESCANEANDO... | DISP: {disp:.2f} USDC", end='\r')
+                # Si no hay nada, el radar busca una por una (Secuencial)
                 for m in monedas:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
                     cl = [float(x[4]) for x in k]
@@ -70,6 +76,7 @@ def bot_quantum_final():
                     
                     if (cl[-1] > e9 > e27) or (cl[-1] < e9 < e27):
                         side_in = SIDE_BUY if cl[-1] > e9 else SIDE_SELL
+                        # Usamos 90% para llegar al mínimo de 5 USDC
                         monto = disp * 0.90 if (disp * palanca) < 5.1 else disp * 0.20
                         
                         decs = 0 if m in ['DOGEUSDC', 'TRXUSDC'] else 1
@@ -78,19 +85,22 @@ def bot_quantum_final():
                         if (cant * cl[-1]) >= 5.0:
                             c.futures_change_leverage(symbol=m, leverage=palanca)
                             c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"\n🎯 ENGANCHE EN {m}. ACTIVANDO VIGILANCIA...")
                             
                             threading.Thread(target=vigilante_ultra_pegado, 
                                              args=(c, m, ("LONG" if side_in==SIDE_BUY else "SHORT"), cant, cl[-1], palanca, comision, stop_loss),
                                              daemon=True).start()
-                            
-                            time.sleep(30)
+                            time.sleep(30) # Descanso de 30s entre enganches
                             break
-            else:
-                time.sleep(1)
+            
+            # Dashboard simple para ver que está vivo
+            print(f"📡 Saldo: {disp:.2f} USDC | Radar: OK", end='\r')
 
         except Exception as e:
-            print(f"\n⚠️ Error en motor: {e}")
+            print(f"\n⚠️ Error en motor: {e}. Reintentando...")
             time.sleep(10)
+        
+        time.sleep(2)
 
 if __name__ == "__main__":
-    bot_quantum_final()
+    bot_quantum_definitivo()
