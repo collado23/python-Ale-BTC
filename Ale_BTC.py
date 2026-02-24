@@ -6,7 +6,7 @@ from binance.enums import *
 max_rois = {}
 
 def bot_quantum_final():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     comision = 0.001 
