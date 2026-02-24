@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
 # Variables globales para el Dashboard
@@ -13,7 +13,6 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
     info_op["entrada"] = entry
     info_op["pico"] = 0.0
     
-    # AJUSTE SOLICITADO
     gatillo_trailing = 1.20 
     margen_pegado = 0.05
 
@@ -28,14 +27,12 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
             if roi > info_op["pico"]:
                 info_op["pico"] = roi
             
-            # El piso ahora se activa recién al 1.20%
             info_op["roi"] = roi
             info_op["piso"] = info_op["pico"] - margen_pegado if info_op["pico"] >= gatillo_trailing else -99.0
 
-            # CIERRE INSTANTÁNEO
             if (info_op["pico"] >= gatillo_trailing and roi <= info_op["piso"]) or (roi <= stop_loss):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"\n✅ CIERRE EJECUTADO EN {sym} A {roi:.2f}%")
+                print(f"\n✅ CIERRE EN {sym} A {roi:.2f}%")
                 info_op["activo"] = False
                 break 
             
@@ -44,25 +41,28 @@ def vigilante_ultra_rapido(c, sym, side, q, entry, palanca, comision, stop_loss)
             info_op["activo"] = False
             break
 
-def bot_quantum_v4_final_120():
+def bot_quantum_v5_final():
     api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
     api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
     
     if not api_key:
-        print("❌ Error: Faltan las API KEYS en Railway.")
+        print("❌ Error: Configura las API KEYS en Railway.")
         return
 
     c = Client(api_key, api_secret)
+    # IMPORTANTE: Forzamos el uso de USDC para evitar el error de símbolo
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
-    palanca, monedas = 5, ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
+    palanca = 5
+    monedas = ['DOGEUSDC', 'ADAUSDC', 'XRPUSDC', 'TRXUSDC']
     comision, stop_loss = 0.001, -3.0
 
-    print("🚀 ALE IA QUANTUM - GATILLO 1.20% ACTIVADO")
+    print("🚀 ALE IA QUANTUM - MODO USDC GATILLO 1.20%")
 
     while True:
         try:
             acc = c.futures_account()
+            # Buscamos saldo específicamente en USDC
             disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             
             pos = c.futures_position_information()
@@ -71,6 +71,8 @@ def bot_quantum_v4_final_120():
             if len(activas) > 0:
                 for a in activas:
                     sym = a['symbol']
+                    if sym not in monedas: continue # Ignora si tienes algo en USDT manual
+                    
                     q = abs(float(a['positionAmt']))
                     if not info_op["activo"]:
                         side_in = "LONG" if float(a['positionAmt']) > 0 else "SHORT"
@@ -80,28 +82,24 @@ def bot_quantum_v4_final_120():
                                          daemon=True).start()
                 
                 print("\n" + "📊" * 15)
-                print(f"💰 DISPONIBLE: {disp:.2f} USDC")
-                print(f"🔥 MONEDA: {info_op['sym']} | {info_op['side']}")
-                print(f"💵 CAPITAL: {info_op['capital']:.2f} USDC | ENTRADA: {info_op['entrada']:.5f}")
-                print(f"📈 ROI ACTUAL: {info_op['roi']:.2f}%")
-                print(f"🔝 MÁXIMO: {info_op['pico']:.2f}% | PISO CIERRE: {info_op['piso']:.2f}%")
+                print(f"💰 DISP: {disp:.2f} USDC | 🔥 {info_op['sym']}")
+                print(f"💵 {info_op['side']} | ENTRADA: {info_op['entrada']:.5f}")
+                print(f"📈 ROI: {info_op['roi']:.2f}% | 🔝 MAX: {info_op['pico']:.2f}%")
+                print(f"📉 PISO CIERRE: {info_op['piso']:.2f}%")
                 print("-" * 30)
 
             else:
-                print(f"📡 RADAR BUSCANDO TENDENCIA... | SALDO: {disp:.2f}", end='\r')
+                print(f"📡 RADAR BUSCANDO EN USDC... | SALDO: {disp:.2f}", end='\r')
                 for m in monedas:
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
-                    e27_anterior = sum(cl[-29:-2])/27
+                    e27_ant = sum(cl[-29:-2])/27
                     
-                    tendencia_sube = e27 > e27_anterior
-                    tendencia_baja = e27 < e27_anterior
-
-                    if (cl[-1] > e9 > e27) and tendencia_sube:
+                    if (cl[-1] > e9 > e27) and (e27 > e27_ant):
                         side_order = SIDE_BUY
-                    elif (cl[-1] < e9 < e27) and tendencia_baja:
+                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant):
                         side_order = SIDE_SELL
                     else: continue
 
@@ -111,15 +109,15 @@ def bot_quantum_v4_final_120():
                     if (cant * cl[-1]) >= 5.0:
                         c.futures_change_leverage(symbol=m, leverage=palanca)
                         c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        print(f"\n🎯 ENGANCHE: {m}")
+                        print(f"\n🎯 ENGANCHE EN {m}")
                         time.sleep(5)
                         break
 
         except Exception as e:
-            print(f"\n⚠️ Error: {e}")
+            print(f"\n⚠️ Error motor: {e}")
             time.sleep(5)
         
         time.sleep(2)
 
 if __name__ == "__main__":
-    bot_quantum_v4_final_120()
+    bot_quantum_v5_final()
