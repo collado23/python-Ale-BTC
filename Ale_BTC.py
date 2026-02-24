@@ -2,82 +2,104 @@ import os, time
 from binance.client import Client
 from binance.enums import *
 
-def bot():
-    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET")) 
+# Memoria para rastrear el ROI más alto por moneda
+max_rois = {}
+
+def bot_quantum_final():
+    c = Client(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
-    max_roi = 0
-    piso = -4.0
-    hubo_posicion = False # Nueva variable para detectar cierres manuales
+    comision = 0.001 
+    descanso = 30
+    palanca = 5 
+    stop_loss = -4.0  # <--- STOP LOSS AL 4% COMO PEDISTE
+    monedas = ['DOGEUSDC', 'SOLUSDC', 'XRPUSDC', 'ETHUSDC'] 
 
-    print("🚀 V182 | ESPERA TOTAL 30s (Manual o Auto) | TRAILING 0.3%")
+    print("🚀 ALE IA QUANTUM INICIADO | STOP LOSS: 4% | TRAILING: 2.3%")
 
     while True:
         try:
             acc = c.futures_account()
             disponible = next((float(b['availableBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
-            pos = c.futures_position_information()
-            activa = next((p for p in pos if float(p.get('positionAmt', 0)) != 0), None)
+            
+            # REGLA DE ESCALADA 60/100
+            if disponible >= 100: max_ops = 10
+            elif disponible >= 60: max_ops = 6
+            else: max_ops = 2
 
-            if activa:
-                hubo_posicion = True # El bot sabe que hay algo abierto
+            pos = c.futures_position_information()
+            activas = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
+
+            os.system('cls' if os.name == 'nt' else 'clear')
+            print(f"💰 SALDO: {disponible:.2f} USDC | OPS: {len(activas)}/{max_ops} | SL: {stop_loss}%")
+            print("-" * 80)
+            print(f"{'MONEDA':<10} | {'PRECIO':<10} | {'ROI %':<8} | {'MAX %':<8} | {'PISO %':<8} | {'ESTADO'}")
+            print("-" * 80)
+
+            for activa in activas:
                 sym = activa['symbol']
-                entry = float(activa['entryPrice'])
                 q = abs(float(activa['positionAmt']))
                 side = 'LONG' if float(activa['positionAmt']) > 0 else 'SHORT'
+                entry = float(activa['entryPrice'])
                 
                 res = c.futures_mark_price(symbol=sym)
                 m_p = float(res['markPrice'])
                 
-                roi = ((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * 100 * 5 
-                
-                if roi > max_roi:
-                    max_roi = roi
-                
-                # TRAILING 0.3%
-                if max_roi >= 2.3:
-                    piso = max_roi - 0.3
-                elif max_roi >= 2.0:
-                    piso = 2.0
-                else:
-                    piso = -4.0 
-                
-                if roi <= piso:
+                # ROI Neto (incluye palanca y resta comisión)
+                roi_pct = ((((m_p - entry)/entry if side=="LONG" else (entry - m_p)/entry) * palanca) - comision) * 100
+
+                # Lógica de Máximos para el Trailing
+                if sym not in max_rois: max_rois[sym] = roi_pct
+                if roi_pct > max_rois[sym]: max_rois[sym] = roi_pct
+
+                # Cálculo de Trailing Stop (Inicia en 2.3% cada 0.3%)
+                piso = -99.0
+                estado = "⚡ VIGILANDO"
+                if max_rois[sym] >= 2.3:
+                    piso = max_rois[sym] - 0.3
+                    estado = "🔥 TRAILING"
+                elif roi_pct <= stop_loss:
+                    estado = "🚨 STOP LOSS"
+
+                print(f"{sym:<10} | {m_p:<10.4f} | {roi_pct:>7.2f}% | {max_rois[sym]:>7.2f}% | {piso:>7.2f}% | {estado}")
+
+                # GATILLOS DE CIERRE
+                if (max_rois[sym] >= 2.3 and roi_pct <= piso) or (roi_pct <= stop_loss):
                     c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
                                          type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"\n💰 CIERRE AUTO: {roi:.2f}%")
-                    # No pongo el sleep acá, dejo que lo haga abajo
-                
-                print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {max_roi:.2f}% | PISO: {piso:.2f}%", end='\r')
+                    print(f"\n✅ CIERRE EN {sym} ({estado}) | ROI FINAL: {roi_pct:.2f}%")
+                    if sym in max_rois: del max_rois[sym]
+                    time.sleep(descanso)
 
-            else:
-                # SI NO HAY POSICIÓN PERO HACE UN SEGUNDO SÍ HABÍA (Cierre manual o auto)
-                if hubo_posicion:
-                    print("\n⏳ POSICIÓN CERRADA. Iniciando pausa de 30 segundos...")
-                    time.sleep(30)
-                    hubo_posicion = False # Reseteamos para que no vuelva a dormir
-                    max_roi = 0
-                    piso = -4.0
-                    continue
+            # --- BUSCADOR DE ENTRADAS (20% SALDO) ---
+            if len(activas) < max_ops:
+                for m in monedas:
+                    if any(a['symbol'] == m for a in activas): continue 
 
-                # BUSCADOR DE ENTRADAS
-                for m in ['SOLUSDC', 'XRPUSDC', 'BNBUSDC']:
                     k = c.futures_klines(symbol=m, interval='1m', limit=30)
-                    cl, e9, e27 = float(k[-2][4]), sum(float(x[4]) for x in k[-9:])/9, sum(float(x[4]) for x in k[-27:])/27
-                    if (cl > e9 > e27) or (cl < e9 < e27):
-                        side_in = SIDE_BUY if cl > e9 else SIDE_SELL
-                        c.futures_change_leverage(symbol=m, leverage=5)
-                        p_act = float(c.futures_symbol_ticker(symbol=m)['price'])
-                        cant = round(((disponible * 0.90) * 5) / p_act, 1)
-                        if cant > 0:
-                            c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
-                            print(f"\n🚀 ENTRADA EN {m}")
-                            break
-                print(f"🔍 BUSCANDO... | SALDO: {disponible:.2f} USDC", end='\r')
+                    cl = [float(x[4]) for x in k]
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
+                    p_act = cl[-1]
+
+                    # Cruce de líneas 9 y 27
+                    if p_act > e9 > e27: side_in = SIDE_BUY
+                    elif p_act < e9 < e27: side_in = SIDE_SELL
+                    else: continue
+
+                    c.futures_change_leverage(symbol=m, leverage=palanca)
+                    monto_op = (disponible * 0.20) * palanca 
+                    cant = round(monto_op / p_act, 1 if m != 'DOGEUSDC' else 0)
+
+                    if cant > 0:
+                        c.futures_create_order(symbol=m, side=side_in, type=ORDER_TYPE_MARKET, quantity=cant)
+                        max_rois[m] = 0
+                        print(f"\n🎯 NUEVA ENTRADA: {m} | PRECIO: {p_act}")
+                        break 
 
         except Exception as e:
-            time.sleep(2)
-        time.sleep(2)
+            time.sleep(5)
+        
+        time.sleep(3)
 
 if __name__ == "__main__":
-    bot()
+    bot_quantum_final()
