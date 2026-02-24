@@ -11,7 +11,7 @@ class HealthCheck(BaseHTTPRequestHandler):
         self.wfile.write(b"ALE IA QUANTUM VIVE")
 
 def run_health_server():
-    server = HTTPServer(('0.0.0.0', int(os.getenv("PORT", 8080))), HealthCheck)
+    server = HTTPServer(('0.0.0.0', int(os.getenv("PORT", 8080))), HealthCheck) 
     server.serve_forever()
 
 # --- MEMORIA DE TRAILING ---
