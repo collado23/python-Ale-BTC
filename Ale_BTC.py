@@ -2,7 +2,7 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de picos para el Trailing
+# Memoria de picos para el Trailing 
 picos_maximos = {}
 
 def vigilante_ultra_pegado(c, sym, side, q, entry, palanca, comision, stop_loss):
