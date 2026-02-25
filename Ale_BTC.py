@@ -5,7 +5,7 @@ from binance.enums import *
 # Memoria de operaciones bloqueada para evitar cierres falsos
 ops_activas = {} 
 
-def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
+def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss): 
     global ops_activas
     pico = 0.0
     gatillo_trailing = 1.20 
