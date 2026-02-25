@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client
+from binance.client import Client 
 from binance.enums import *
 
 # Diccionario para mantener el control de los hilos
