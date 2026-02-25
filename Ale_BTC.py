@@ -1,6 +1,6 @@
 import os, time, threading, math
 from binance.client import Client 
-from binance.enums import *
+from binance.enums import * 
 
 # --- MEMORIA Y SEGUROS ---
 ops_activas = {} 
