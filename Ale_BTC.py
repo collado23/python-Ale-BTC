@@ -2,7 +2,7 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de protección contra bucles
+# Memoria de protección contra bucles 
 vigilantes_vivos = set()
 
 def vigilante_bunker(c, sym, side, q, entry, palanca, comision, stop_loss):
