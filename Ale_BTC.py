@@ -1,7 +1,7 @@
 import os, time, threading
 from binance.client import Client
 from binance.enums import *
-
+ 
 # Memoria de operaciones bloqueada
 ops_activas = {} 
 
