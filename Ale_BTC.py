@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client
+from binance.client import Client 
 from binance.enums import *
 
 # Diccionario para evitar lanzar múltiples vigilantes sobre la misma moneda
