@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client
+from binance.client import Client 
 from binance.enums import *
 
 # Memoria de operaciones y bloqueo de seguridad
