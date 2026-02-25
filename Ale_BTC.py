@@ -1,14 +1,14 @@
 import os, time, threading, math
-from binance.client import Client 
-from binance.enums import * 
+from binance.client import Client
+from binance.enums import *
 
-# --- MEMORIA Y SEGUROS ---
+# Memoria para seguimiento
 ops_activas = {} 
 bloqueo_enfriamiento = {} 
 
 def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
     global ops_activas, bloqueo_enfriamiento
-    objetivo_profit = 1.20 # Cierre fijo
+    objetivo_profit = 1.20 # REGLA: 1.20% clavado
 
     while sym in ops_activas:
         try:
@@ -19,7 +19,7 @@ def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
             
             if (roi >= objetivo_profit) or (roi <= stop_loss):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"\n✅ CIERRE EJECUTADO: {sym} | ROI: {roi:.2f}%")
+                print(f"\n✅ CIERRE: {sym} | ROI: {roi:.2f}%")
                 if sym in ops_activas: del ops_activas[sym]
                 bloqueo_enfriamiento[sym] = time.time()
                 break 
@@ -37,10 +37,10 @@ def bot_quantum_v13_final():
     c.API_URL = 'https://fapi.binance.com/fapi/v1'
     
     monedas = ['SOLUSDC', 'PEPEUSDC', 'DOGEUSDC', 'ADAUSDC']
-    palanca, stop_loss = 5, -4.0 # x5 palanca y SL -4.0%
+    palanca, stop_loss = 5, -4.0 
     max_ops = 2 
 
-    print(f"🚀 V13 INICIADA | REVISANDO ENTRADAS...")
+    print(f"🚀 BOT V13 ACTIVO | MONTO: 4.30 USDC | PROFIT: 1.20%")
 
     while True:
         try:
@@ -56,7 +56,6 @@ def bot_quantum_v13_final():
             
             print(f"💰 DISP: {disp:.2f} USDC | ACTIVAS: {len(reales)}/2")
 
-            # ENGANCHE
             for r in reales:
                 s = r['symbol']
                 if s not in ops_activas:
@@ -64,8 +63,7 @@ def bot_quantum_v13_final():
                     ops_activas[s] = {"roi": 0}
                     threading.Thread(target=vigilante_blindado, args=(c, s, side_in, abs(float(r['positionAmt'])), float(r['entryPrice']), palanca, 0.001, stop_loss), daemon=True).start()
 
-            # DETECCIÓN DE SEÑAL
-            if len(reales) < max_ops and disp > 4.60:
+            if len(reales) < max_ops and disp > 4.50:
                 for m in monedas:
                     if m in simbolos_reales or (m in bloqueo_enfriamiento and time.time() - bloqueo_enfriamiento[m] < 300): continue
 
@@ -74,26 +72,22 @@ def bot_quantum_v13_final():
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     e27_ant = sum(cl[-29:-2])/27
 
-                    # TENDENCIA (Precio + E9 + E27) - Filtro de tu imagen
                     es_long = (cl[-1] > e27) and (e27 > e27_ant) and (cl[-1] > e9)
                     es_short = (cl[-1] < e27) and (e27 < e27_ant) and (cl[-1] < e9)
 
                     if es_long or es_short:
-                        side_order = SIDE_BUY if es_long else SIDE_SELL
-                        # Monto fijo para asegurar 2 operaciones con 9.74 USDC
-                        monto_fijo = 4.30 
+                        monto_fijo_usdc = 4.30 
                         decs = 0 if 'PEPE' in m or 'DOGE' in m else 2
-                        cant = math.floor((monto_fijo * palanca / cl[-1]) * (10**decs)) / (10**decs)
+                        cant = math.floor((monto_fijo_usdc * palanca / cl[-1]) * (10**decs)) / (10**decs)
                         
                         if cant > 0:
                             c.futures_change_leverage(symbol=m, leverage=palanca)
-                            c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                            print(f"🎯 ENTRANDO EN {m} | MONTO: {monto_fijo}")
+                            c.futures_create_order(symbol=m, side=SIDE_BUY if es_long else SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"🎯 DISPARO EN {m} POR {monto_fijo_usdc} USDC")
                             time.sleep(5); break
         except Exception as e:
-            print(f"⚠️ Error: {e}")
             time.sleep(5)
-        time.sleep(5)
+        time.sleep(10)
 
 if __name__ == "__main__":
     bot_quantum_v13_final()
