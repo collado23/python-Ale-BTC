@@ -2,7 +2,7 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de operaciones bloqueada
+# Memoria de operaciones bloqueada 
 ops_activas = {} 
 
 def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
