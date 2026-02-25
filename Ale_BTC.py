@@ -1,8 +1,8 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
-# === VARIABLES GLOBALES ===
+# === CONTROL GLOBAL ===
 vigilantes_activos = set()
 ultimo_cierre_tiempo = 0
 contador_ops = 0 
@@ -12,8 +12,6 @@ def vigilante_bunker(c, sym, side, q, entry, palanca, comision, stop_loss):
     vigilantes_activos.add(sym)
     pico, gatillo_trailing, margen_pegado = 0.0, 2.80, 0.20
     
-    print(f"🛡️ [VIGILANTE] {sym} PROTEGIENDO | Entrada: {entry}")
-
     while True:
         try:
             res = c.futures_mark_price(symbol=sym)
@@ -24,68 +22,64 @@ def vigilante_bunker(c, sym, side, q, entry, palanca, comision, stop_loss):
             if roi > pico: pico = roi
             piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
 
-            # ROI visible línea por línea
-            print(f"📊 {sym} -> ROI: {roi:.2f}% | MAX: {pico:.2f}% | PISO: {piso:.2f}%")
+            print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {pico:.2f}%")
 
             if (pico >= gatillo_trailing and roi <= piso) or (roi <= stop_loss):
-                c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"✅ CIERRE {sym} | ROI: {roi:.2f}%")
-                ultimo_cierre_tiempo = time.time()
-                break 
-            time.sleep(6) 
+                try:
+                    c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
+                    print(f"✅ CIERRE EXITOSO {sym}")
+                    ultimo_cierre_tiempo = time.time()
+                    break
+                except Exception as e:
+                    print(f"⚠️ Error al cerrar {sym}: {e}. Intentando de nuevo...")
+                    time.sleep(5)
+            
+            time.sleep(8) 
         except:
-            time.sleep(10)
+            time.sleep(15)
+    
     if sym in vigilantes_activos: vigilantes_activos.remove(sym)
 
-def bot_quantum_v15():
+def bot_quantum_v15_4():
     global contador_ops
-    # Inicialización para evitar el error 'UnboundLocalError' de tu foto
-    disp, total_w, max_ops = 0.0, 0.0, 2
-    simbolos_reales = []
-
-    print("🚀 V15.0 | MODO CONTADOR Y ESCALA | INICIANDO...")
+    disp, total_w = 0.0, 0.0
+    
+    print("🚀 V15.4 | SOLO SOL Y PEPE | LIMITE 40% MARGEN")
 
     while True:
         try:
-            # 1. DETECCIÓN FLEXIBLE DE LLAVES (Busca ambos nombres)
             api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
             api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
             
-            if not api_key or not api_secret:
-                print("⚠️ ERROR: No encuentro las llaves. Ponelas como 'API_KEY' en Railway.")
-                time.sleep(20); continue
+            if not api_key:
+                time.sleep(30); continue
 
             c = Client(api_key, api_secret)
             c.API_URL = 'https://fapi.binance.com/fapi/v1'
 
-            # 2. LECTURA DE BILLETERA
+            # 1. ACTUALIZAR SALDO
             acc = c.futures_account()
             for b in acc['assets']:
                 if b['asset'] == 'USDC':
                     disp = float(b['availableBalance'])
                     total_w = float(b['walletBalance'])
 
-            # 3. LÓGICA DE ESCALA QUE PEDISTE
-            if total_w >= 100: max_ops = 10
-            elif total_w >= 60: max_ops = 6
-            else: max_ops = 2
-            
-            # 4. SINCRONIZACIÓN DE POSICIONES
+            # 2. SINCRONIZAR POSICIONES ABIERTAS
             pos = c.futures_position_information()
             reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
             simbolos_reales = [r['symbol'] for r in reales]
 
             for r in reales:
-                s = r['symbol']
-                if s not in vigilantes_activos:
-                    side_in = "LONG" if float(r['positionAmt']) > 0 else "SHORT"
-                    threading.Thread(target=vigilante_bunker, args=(c, s, side_in, abs(float(r['positionAmt'])), float(r['entryPrice']), 5, 0.001, -8.0), daemon=True).start()
+                if r['symbol'] not in vigilantes_activos:
+                    threading.Thread(target=vigilante_bunker, args=(c, r['symbol'], "LONG" if float(r['positionAmt']) > 0 else "SHORT", abs(float(r['positionAmt'])), float(r['entryPrice']), 5, 0.001, -8.0), daemon=True).start()
 
-            # 5. RADAR (SOL y PEPE)
-            if len(simbolos_reales) < max_ops and (time.time() - ultimo_cierre_tiempo > 300):
+            # 3. RADAR LIMITADO A 2 MONEDAS Y 40% DE DISPONIBLE
+            if disp > 5.5 and len(simbolos_reales) < 2 and (time.time() - ultimo_cierre_tiempo > 300):
+                # LISTA FIJA DE 2 MONEDAS
                 for m in ['SOLUSDC', '1000PEPEUSDC']:
                     if m in simbolos_reales: continue
                     
+                    # Lógica de Tendencia EMA
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
@@ -95,24 +89,25 @@ def bot_quantum_v15():
                     elif (cl[-1] < e9 < e27) and (e27 < e27_ant): s_order = SIDE_SELL
                     else: continue
 
-                    # Interés compuesto al 20% si conviene
-                    monto_in = disp * 0.20 if total_w > 40 else disp * 0.45
+                    # CALCULO DE TAMAÑO (USANDO SOLO EL 40%)
+                    monto_in = disp * 0.40 
                     decs = 0 if 'PEPE' in m else 2
                     cant = round((monto_in * 5) / cl[-1], decs)
                     
-                    if (cant * cl[-1]) >= 5.0:
+                    if (cant * cl[-1]) >= 5.1:
                         c.futures_change_leverage(symbol=m, leverage=5)
                         c.futures_create_order(symbol=m, side=s_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        contador_ops += 1 # Aumenta el contador
-                        print(f"🎯 OPERACIÓN #{contador_ops} INICIADA EN {m}")
+                        contador_ops += 1
+                        print(f"🎯 ENTRADA #{contador_ops} EN {m} (40% saldo)")
                         time.sleep(10); break
 
-            print(f"💰 WALLET: {total_w:.2f} | ACTIVAS: {len(simbolos_reales)}/{max_ops} | TOTAL HOY: {contador_ops}")
+            print(f"💰 WALLET: {total_w:.2f} | DISP: {disp:.2f} | ACTIVAS: {len(simbolos_reales)}/2 | TOTAL HOY: {contador_ops}")
 
         except Exception as e:
-            print(f"⚠️ Error: {e}. Reintentando..."); time.sleep(20)
+            print(f"⚠️ Error: {e}")
+            time.sleep(30)
         
         time.sleep(20)
 
 if __name__ == "__main__":
-    bot_quantum_v15()
+    bot_quantum_v15_4()
