@@ -2,7 +2,7 @@ import os, time, threading, math
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de operaciones y bloqueo temporal
+# Memoria de operaciones y bloqueo temporal 
 ops_activas = {} 
 bloqueo_enfriamiento = {} 
 
