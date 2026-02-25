@@ -1,7 +1,7 @@
 import os, time, threading
 from binance.client import Client
 from binance.enums import *
-
+ 
 # === VARIABLES GLOBALES ===
 vigilantes_activos = set()
 ultimo_cierre_tiempo = 0
