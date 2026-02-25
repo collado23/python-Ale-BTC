@@ -1,5 +1,5 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
 # === VARIABLES GLOBALES ===
@@ -11,54 +11,56 @@ def vigilante_bunker(c, sym, side, q, entry, palanca, comision):
     global vigilantes_activos, ultimo_cierre_tiempo
     vigilantes_activos.add(sym)
     
-    # --- AJUSTE SOLICITADO ---
+    # --- AJUSTES DE PRECISIÓN ---
     stop_loss = -4.0        
     gatillo_trailing = 1.2  
-    margen_pegado = 0.15    # <--- Bajado a 0.15% para cierres más rápidos
+    margen_pegado = 0.15    # Tu retroceso ajustado
     
     pico = 0.0
-    print(f"🛡️ [VIGILANTE] {sym} ACTIVO | Trail: 1.2% | Retroceso: 0.15%")
+    print(f"⚡ [MODO FLASH] {sym} ACTIVO | Revisión cada 1.5s")
 
     while True:
         try:
-            # 1. VERIFICAR SI LA POSICIÓN SIGUE EXISTIENDO
-            pos = c.futures_position_information(symbol=sym)
-            check = next((p for p in pos if float(p.get('positionAmt', 0)) != 0), None)
-            
-            if not check:
-                print(f"🧹 {sym} ya no existe en Binance. Limpiando programa...")
-                break # Sale del bucle y mata el vigilante
-
+            # Captura de precio inmediata
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
+            
+            # Cálculo de ROI ultra rápido
             diff = (m_p - entry) if side == "LONG" else (entry - m_p)
             roi = ((diff / entry) * palanca - comision) * 100
             
             if roi > pico: pico = roi
             piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
 
-            print(f"📊 {sym} | ROI: {roi:.2f}% | MAX: {pico:.2f}% | PISO: {piso:.2f}%")
-
+            # CIERRE INMEDIATO (Si toca el piso o el stop loss)
             if (pico >= gatillo_trailing and roi <= piso) or (roi <= stop_loss):
-                try:
-                    c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                    print(f"✅ CIERRE EJECUTADO EN {sym}")
-                    ultimo_cierre_tiempo = time.time()
+                c.futures_create_order(
+                    symbol=sym, 
+                    side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
+                    type=ORDER_TYPE_MARKET, 
+                    quantity=q
+                )
+                print(f"🔥 CIERRE FLASH EJECUTADO EN {sym} | ROI: {roi:.2f}%")
+                ultimo_cierre_tiempo = time.time()
+                break
+
+            # Verificación de existencia (cada 3 ciclos para no saturar)
+            # Si no hay monedas, apaga el vigilante
+            if int(time.time()) % 5 == 0:
+                pos = c.futures_position_information(symbol=sym)
+                if not any(float(p.get('positionAmt', 0)) != 0 for p in pos):
+                    print(f"🧹 Limpieza: {sym} ya no está en Binance.")
                     break
-                except Exception as e:
-                    print(f"⚠️ Error al cerrar: {e}")
-                    time.sleep(5)
-            
-            time.sleep(7) 
+
+            time.sleep(1.5) # <--- VELOCIDAD MÁXIMA DE REVISIÓN
         except Exception as e:
-            print(f"⚠️ Vigilante {sym} esperando: {e}")
-            time.sleep(15)
+            time.sleep(5)
     
     if sym in vigilantes_activos: vigilantes_activos.remove(sym)
 
-def bot_quantum_v15_9():
+def bot_quantum_v16_0():
     global contador_ops
-    print("🚀 V15.9 | TRAILING 0.15% | AUTO-LIMPIEZA ACTIVADA")
+    print("🚀 V16.0 | CIERRE INSTANTÁNEO 1.5s | MARGEN 40%")
 
     while True:
         try:
@@ -77,12 +79,11 @@ def bot_quantum_v15_9():
             reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
             simbolos_reales = [r['symbol'] for r in reales]
 
-            # Lanzar vigilantes solo si no existen
             for r in reales:
                 if r['symbol'] not in vigilantes_activos:
                     threading.Thread(target=vigilante_bunker, args=(c, r['symbol'], "LONG" if float(r['positionAmt']) > 0 else "SHORT", abs(float(r['positionAmt'])), float(r['entryPrice']), 5, 0.001), daemon=True).start()
 
-            # --- BUSCADOR DE TENDENCIA (CON CANDADO DE 1 MINUTO) ---
+            # --- BUSCADOR DE TENDENCIA (CANDADO 1 MIN) ---
             if len(simbolos_reales) < 2 and (time.time() - ultimo_cierre_tiempo > 60):
                 for m in ['SOLUSDC', '1000PEPEUSDC']:
                     if m in simbolos_reales: continue
@@ -97,7 +98,7 @@ def bot_quantum_v15_9():
                     elif (cl[-1] < e9 < e27) and (e27 < e27_ant): side_order = SIDE_SELL
                     
                     if side_order:
-                        monto_in = total_w * 0.40 # Reserva el 60% para margen
+                        monto_in = total_w * 0.40
                         decs = 0 if 'PEPE' in m else 2
                         cant = round((monto_in * 5) / cl[-1], decs)
                         
@@ -105,14 +106,12 @@ def bot_quantum_v15_9():
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
                             contador_ops += 1
-                            print(f"🎯 ENTRADA #{contador_ops} EN {m}")
-                            time.sleep(5); break
-
-            print(f"💰 WALLET: {total_w:.2f} | DISP: {disp:.2f} | ACTIVAS: {len(simbolos_reales)}/2")
+                            print(f"🎯 TENDENCIA DETECTADA: ENTRANDO EN {m}")
+                            time.sleep(2); break
 
         except Exception as e:
-            time.sleep(20)
-        time.sleep(20)
+            time.sleep(10)
+        time.sleep(15)
 
 if __name__ == "__main__":
-    bot_quantum_v15_9()
+    bot_quantum_v16_0()
