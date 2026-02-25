@@ -5,7 +5,7 @@ from binance.enums import *
 # Diccionario de protección
 vigilantes_activos = set()
 
-def vigilante_bunker(c, sym, side, q, entry, palanca, comision, stop_loss):
+def vigilante_bunker(c, sym, side, q, entry, palanca, comision, stop_loss): 
     global vigilantes_activos
     vigilantes_activos.add(sym)
     pico = 0.0
