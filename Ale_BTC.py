@@ -1,66 +1,55 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
 # === VARIABLES GLOBALES ===
 vigilantes_activos = set()
 ultimo_cierre_tiempo = 0
-contador_ops = 0 
+contador_ops = 0  # <--- Este es tu contador
 
 def vigilante_bunker(c, sym, side, q, entry, palanca, comision):
     global vigilantes_activos, ultimo_cierre_tiempo
     vigilantes_activos.add(sym)
     
-    # --- AJUSTES DE PRECISIÓN ---
     stop_loss = -4.0        
     gatillo_trailing = 1.2  
-    margen_pegado = 0.15    # Tu retroceso ajustado
+    margen_pegado = 0.15    
     
     pico = 0.0
-    print(f"⚡ [MODO FLASH] {sym} ACTIVO | Revisión cada 1.5s")
+    print(f"⚡ [VIGILANTE] {sym} ACTIVO | Trail: 1.2% | Retroceso: 0.15%")
 
     while True:
         try:
-            # Captura de precio inmediata
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
-            
-            # Cálculo de ROI ultra rápido
             diff = (m_p - entry) if side == "LONG" else (entry - m_p)
             roi = ((diff / entry) * palanca - comision) * 100
             
             if roi > pico: pico = roi
             piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
 
-            # CIERRE INMEDIATO (Si toca el piso o el stop loss)
+            # CIERRE FLASH
             if (pico >= gatillo_trailing and roi <= piso) or (roi <= stop_loss):
-                c.futures_create_order(
-                    symbol=sym, 
-                    side=SIDE_SELL if side=="LONG" else SIDE_BUY, 
-                    type=ORDER_TYPE_MARKET, 
-                    quantity=q
-                )
-                print(f"🔥 CIERRE FLASH EJECUTADO EN {sym} | ROI: {roi:.2f}%")
+                c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
+                print(f"🔥 CIERRE EJECUTADO EN {sym} | ROI: {roi:.2f}%")
                 ultimo_cierre_tiempo = time.time()
                 break
 
-            # Verificación de existencia (cada 3 ciclos para no saturar)
-            # Si no hay monedas, apaga el vigilante
-            if int(time.time()) % 5 == 0:
+            # Auto-limpieza si la cierras manual
+            if int(time.time()) % 10 == 0:
                 pos = c.futures_position_information(symbol=sym)
                 if not any(float(p.get('positionAmt', 0)) != 0 for p in pos):
-                    print(f"🧹 Limpieza: {sym} ya no está en Binance.")
                     break
 
-            time.sleep(1.5) # <--- VELOCIDAD MÁXIMA DE REVISIÓN
-        except Exception as e:
+            time.sleep(1.5) 
+        except:
             time.sleep(5)
     
     if sym in vigilantes_activos: vigilantes_activos.remove(sym)
 
-def bot_quantum_v16_0():
+def bot_quantum_v16_2():
     global contador_ops
-    print("🚀 V16.0 | CIERRE INSTANTÁNEO 1.5s | MARGEN 40%")
+    print("🚀 V16.2 INICIADA | SISTEMA DE CONTEO ACTIVO")
 
     while True:
         try:
@@ -83,11 +72,9 @@ def bot_quantum_v16_0():
                 if r['symbol'] not in vigilantes_activos:
                     threading.Thread(target=vigilante_bunker, args=(c, r['symbol'], "LONG" if float(r['positionAmt']) > 0 else "SHORT", abs(float(r['positionAmt'])), float(r['entryPrice']), 5, 0.001), daemon=True).start()
 
-            # --- BUSCADOR DE TENDENCIA (CANDADO 1 MIN) ---
-            if len(simbolos_reales) < 2 and (time.time() - ultimo_cierre_tiempo > 60):
+            # BUSCADOR DE TENDENCIA
+            if len(simbolos_reales) == 0 and (time.time() - ultimo_cierre_tiempo > 60):
                 for m in ['SOLUSDC', '1000PEPEUSDC']:
-                    if m in simbolos_reales: continue
-                    
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
@@ -98,20 +85,24 @@ def bot_quantum_v16_0():
                     elif (cl[-1] < e9 < e27) and (e27 < e27_ant): side_order = SIDE_SELL
                     
                     if side_order:
-                        monto_in = total_w * 0.40
+                        # 65% del capital para superar los 5 USD mínimos
+                        monto_in = total_w * 0.65
                         decs = 0 if 'PEPE' in m else 2
                         cant = round((monto_in * 5) / cl[-1], decs)
                         
                         if disp >= monto_in and (cant * cl[-1]) >= 5.1:
                             c.futures_change_leverage(symbol=m, leverage=5)
                             c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                            contador_ops += 1
-                            print(f"🎯 TENDENCIA DETECTADA: ENTRANDO EN {m}")
-                            time.sleep(2); break
+                            contador_ops += 1 # <--- Suma al contador
+                            print(f"🎯 OPERACIÓN #{contador_ops} ABIERTA EN {m}")
+                            time.sleep(5); break
+
+            # Resumen en consola con el contador visible
+            print(f"💰 WALLET: {total_w:.2f} | DISP: {disp:.2f} | OPS HOY: {contador_ops} | ACTIVAS: {len(simbolos_reales)}/1")
 
         except Exception as e:
-            time.sleep(10)
-        time.sleep(15)
+            time.sleep(20)
+        time.sleep(20)
 
 if __name__ == "__main__":
-    bot_quantum_v16_0()
+    bot_quantum_v16_2()
