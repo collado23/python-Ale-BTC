@@ -1,91 +1,110 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
- 
-# === VARIABLES GLOBALES ===
-vigilantes_activos = set()
-ultimo_cierre_tiempo = 0
-contador_ops = 0 
 
-def vigilante_bunker(c, sym, side, q, entry, palanca):
-    global vigilantes_activos, ultimo_cierre_tiempo
-    if sym in vigilantes_activos: return
-    vigilantes_activos.add(sym)
-    
+# Memoria de operaciones bloqueada para evitar cierres falsos
+ops_activas = {} 
+
+def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
+    global ops_activas
     pico = 0.0
-    margen_pegado = 0.15 
-    print(f"🛡️ [VIGILANTE] {sym} ACTIVO")
+    gatillo_trailing = 1.20 
+    margen_pegado = 0.15 # Ajustado a tu 0.15% de ayer
 
-    while True:
+    while sym in ops_activas:
         try:
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
             
-            # ROI de ayer con comisión 0.1%
+            # ROI Real
             diff = (m_p - entry) if side == "LONG" else (entry - m_p)
-            roi = ((diff / entry) * palanca - 0.1) * 100 
+            roi = ((diff / entry) * palanca - comision) * 100
             
             if roi > pico: pico = roi
-            piso = pico - margen_pegado if pico >= 1.2 else -99.0
+            piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
+            
+            # Actualizamos Dashboard
+            ops_activas[sym].update({"roi": roi, "pico": pico, "piso": piso})
 
-            # ESTO ES LO QUE ME PEDISTE QUE NO QUITE
-            print(f"📊 {sym} -> ROI: {roi:.2f}% | MAX: {pico:.2f}% | PISO: {piso:.2f}%")
+            # EL ÚNICO LUGAR DONDE SE CIERRA LA OPERACIÓN
+            meta_ganada = (pico >= gatillo_trailing and roi <= piso)
+            stop_tocado = (roi <= stop_loss)
 
-            if (pico >= 1.2 and roi <= piso) or (roi <= -4.0):
+            if meta_ganada or stop_tocado:
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"🔥 CIERRE EN {sym} | ROI: {roi:.2f}%")
-                ultimo_cierre_tiempo = time.time()
-                break
-
-            time.sleep(1.5) 
+                print(f"\n✅ {sym} CERRADO | ROI: {roi:.2f}% | MOTIVO: {'META' if meta_ganada else 'SL'}")
+                if sym in ops_activas: del ops_activas[sym]
+                break 
+            
+            time.sleep(0.5)
         except:
-            time.sleep(5)
-    if sym in vigilantes_activos: vigilantes_activos.remove(sym)
+            time.sleep(1)
 
-def bot_quantum_ayer():
-    global contador_ops
-    print("🚀 V15.8 REINSTALADA | SIN MODIFICACIONES")
+def bot_quantum_v13_final():
+    api_key = os.getenv("API_KEY")
+    api_secret = os.getenv("API_SECRET")
+    c = Client(api_key, api_secret)
+    c.API_URL = 'https://fapi.binance.com/fapi/v1'
+    
+    monedas = ['SOLUSDC', '1000PEPEUSDC', 'DOGEUSDC']
+    palanca, stop_loss = 5, -4.0
+    max_ops = 2 
+
+    print(f"🚀 V13 CORREGIDA | 45% POR OPERACIÓN | DOBLE POSICIÓN")
 
     while True:
         try:
-            api_key = os.getenv("API_KEY"); api_secret = os.getenv("API_SECRET")
-            c = Client(api_key, api_secret)
-            c.API_URL = 'https://fapi.binance.com/fapi/v1'
+            pos = c.futures_position_information()
+            reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
+            
+            simbolos_reales = [r['symbol'] for r in reales]
+            for s in list(ops_activas.keys()):
+                if s not in simbolos_reales: del ops_activas[s]
 
             acc = c.futures_account()
-            total_w = next((float(b['walletBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
+            # USAMOS EL BALANCE TOTAL PARA EL CÁLCULO DEL 45%
+            total_balance = float(next((b['walletBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
+            disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             
-            pos_info = c.futures_position_information()
-            reales = [p for p in pos_info if float(p.get('positionAmt', 0)) != 0]
+            print(f"\n💰 TOTAL: {total_balance:.2f} | DISP: {disp:.2f} | ACTIVAS: {len(reales)}/{max_ops}")
             
-            print(f"💰 WALLET: {total_w:.2f} | ACTIVAS: {len(reales)}/1 | HOY: {contador_ops}")
-
             for r in reales:
-                if r['symbol'] not in vigilantes_activos:
-                    threading.Thread(target=vigilante_bunker, args=(c, r['symbol'], "LONG" if float(r['positionAmt']) > 0 else "SHORT", abs(float(r['positionAmt'])), float(r['entryPrice']), 5), daemon=True).start()
+                s = r['symbol']
+                if s not in ops_activas:
+                    side_in = "LONG" if float(r['positionAmt']) > 0 else "SHORT"
+                    ops_activas[s] = {"roi": 0, "pico": 0, "piso": -99, "side": side_in}
+                    threading.Thread(target=vigilante_blindado, args=(c, s, side_in, abs(float(r['positionAmt'])), float(r['entryPrice']), palanca, 0.001, stop_loss), daemon=True).start()
+                
+                inf = ops_activas.get(s, {})
+                print(f"🔹 {s} | ROI: {inf.get('roi',0):.2f}% | MAX: {inf.get('pico',0):.2f}% | PISO: {inf.get('piso',0):.2f}%")
 
-            if len(reales) == 0 and (time.time() - ultimo_cierre_tiempo > 30):
-                for m in ['SOLUSDC', '1000PEPEUSDC']:
-                    k = c.futures_klines(symbol=m, interval='1m', limit=20)
+            if len(reales) < max_ops:
+                for m in monedas:
+                    if m in simbolos_reales: continue
+                    
+                    k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
-                    e9, e15 = sum(cl[-9:])/9, sum(cl[-15:])/15
+                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     
-                    if cl[-1] > e9 > e15: side = SIDE_BUY
-                    elif cl[-1] < e9 < e15: side = SIDE_SELL
+                    if (cl[-1] > e9 > e27): side_order = SIDE_BUY
+                    elif (cl[-1] < e9 < e27): side_order = SIDE_SELL
                     else: continue
-                    
-                    monto_op = total_w * 0.70 # Una sola operación al 70%
-                    cant = round((monto_op * 5) / cl[-1], 0 if 'PEPE' in m else 2)
-                    
-                    c.futures_change_leverage(symbol=m, leverage=5)
-                    c.futures_create_order(symbol=m, side=side, type=ORDER_TYPE_MARKET, quantity=cant)
-                    contador_ops += 1
-                    print(f"🎯 ENTRADA EN {m}")
-                    break
 
-        except:
-            time.sleep(10)
-        time.sleep(15)
+                    # AHORA SÍ: 45% del capital total para que entren las dos
+                    monto = total_balance * 0.45 
+                    decs = 0 if 'PEPE' in m or 'DOGE' in m else 2
+                    cant = round((monto * palanca) / cl[-1], decs)
+                    
+                    if disp >= monto:
+                        c.futures_change_leverage(symbol=m, leverage=palanca)
+                        c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
+                        print(f"🎯 ENTRADA EN {m} CON EL 45% ({monto:.2f} USDC)")
+                        time.sleep(5)
+                        break
+
+        except Exception as e:
+            time.sleep(5)
+        time.sleep(10)
 
 if __name__ == "__main__":
-    bot_quantum_ayer()
+    bot_quantum_v13_final()
