@@ -1,36 +1,41 @@
 import os, time, threading
-from binance.client import Client 
+from binance.client import Client
 from binance.enums import *
 
+# Memoria de operaciones y bloqueo de seguridad
 ops_activas = {} 
+bloqueo_reciente = {} # NUEVO: Evita que la misma moneda entre dos veces seguidas
 
 def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
-    global ops_activas
+    global ops_activas, bloqueo_reciente
     pico = 0.0
     gatillo_trailing = 1.20 
-    margen_pegado = 0.15 
+    margen_pegado = 0.15 # Le damos aire para que no cierre por ruido
 
     while sym in ops_activas:
         try:
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
             
-            if side == "LONG":
-                diff = m_p - entry
-            else:
-                diff = entry - m_p
-            
+            # ROI Real
+            diff = (m_p - entry) if side == "LONG" else (entry - m_p)
             roi = ((diff / entry) * palanca * 100) - (comision * 100)
+            
             if roi > pico: pico = roi
             piso = pico - margen_pegado if pico >= gatillo_trailing else stop_loss
             
             ops_activas[sym].update({"roi": roi, "pico": pico, "piso": piso})
 
+            # Lógica de Cierre
             if (pico >= gatillo_trailing and roi <= (pico - margen_pegado)) or (roi <= stop_loss):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
                 print(f"\n✅ {sym} CERRADO | ROI: {roi:.2f}%")
+                
+                # BLOQUEO DE SEGURIDAD: No entrar en esta moneda por los próximos 60 segundos
+                bloqueo_reciente[sym] = time.time()
                 if sym in ops_activas: del ops_activas[sym]
                 break 
+            
             time.sleep(0.5)
         except:
             time.sleep(1)
@@ -45,7 +50,7 @@ def bot_quantum_v13_final():
     palanca, stop_loss = 5, -4.0
     max_ops = 2 
 
-    print(f"🚀 V13 CON RADAR DE TENDENCIA | 2 OPS")
+    print(f"🚀 V13 TOTAL BLOCK | PROTECCIÓN ANTI-BUCLE ACTIVADA")
 
     while True:
         try:
@@ -53,6 +58,7 @@ def bot_quantum_v13_final():
             reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
             simbolos_reales = [r['symbol'] for r in reales]
 
+            # Limpiar memoria si se cerró manual
             for s in list(ops_activas.keys()):
                 if s not in simbolos_reales: del ops_activas[s]
 
@@ -60,7 +66,7 @@ def bot_quantum_v13_final():
             total_w = float(next((b['walletBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
             
-            print(f"\n💰 WALLET: {total_w:.2f} | ACTIVAS: {len(reales)}/2")
+            print(f"\n💰 SALDO: {total_w:.2f} | ACTIVAS: {len(reales)}/2")
             
             for r in reales:
                 s = r['symbol']
@@ -72,43 +78,36 @@ def bot_quantum_v13_final():
                 inf = ops_activas.get(s, {})
                 print(f"🔹 {s} | ROI: {inf.get('roi',0):.2f}% | MAX: {inf.get('pico',0):.2f}%")
 
-            # RADAR DE TENDENCIA
+            # Radar de Entrada con 2 filtros nuevos
             if len(reales) < max_ops:
                 for m in monedas:
                     if m in simbolos_reales: continue
                     
+                    # FILTRO 1: ¿Se cerró hace menos de un minuto?
+                    if m in bloqueo_reciente:
+                        if time.time() - bloqueo_reciente[m] < 60:
+                            continue # Salta esta moneda, todavía está "caliente"
+
                     k = c.futures_klines(symbol=m, interval='1m', limit=35)
                     cl = [float(x[4]) for x in k]
                     e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
                     e27_ant = sum(cl[-29:-2])/27
                     
-                    # AQUÍ ESTÁ LO QUE ME PEDÍAS: Visualizar la tendencia
-                    if e27 > e27_ant:
-                        tendencia = "📈 SUBIENDO"
-                    elif e27 < e27_ant:
-                        tendencia = "📉 BAJANDO"
-                    else:
-                        tendencia = "↔️ EN RANGO"
-                    
-                    print(f"🔍 ESCANEANDO {m}: {tendencia} (EMA27: {e27:.4f})")
-                    
-                    if (cl[-1] > e9 > e27) and (e27 > e27_ant):
-                        side_order = SIDE_BUY
-                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant):
-                        side_order = SIDE_SELL
-                    else:
-                        continue
+                    # FILTRO 2: Tendencia (Tu lógica 9/27)
+                    if (cl[-1] > e9 > e27) and (e27 > e27_ant): side_order = SIDE_BUY
+                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant): side_order = SIDE_SELL
+                    else: continue
 
+                    # Cálculo de cantidad para que entren las 2 (Mínimo 5 USD)
                     monto = total_w * 0.45 
-                    decs = 0 if 'PEPE' in m or 'DOGE' in m else 1
-                    cant = round((monto * palanca) / cl[-1], decs)
+                    decs = 0 if 'PEPE' in m or 'DOGE' in m else 2
+                    cant = abs(round((monto * palanca) / cl[-1], decs))
                     
                     if disp >= monto:
                         c.futures_change_leverage(symbol=m, leverage=palanca)
                         c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        print(f"🎯 ENTRADA CONFIRMADA EN {m} POR TENDENCIA")
+                        print(f"🎯 ENTRADA NUEVA EN {m}")
                         time.sleep(5); break
-
         except:
             time.sleep(2)
         time.sleep(5)
