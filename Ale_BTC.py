@@ -2,110 +2,96 @@ import os, time, threading
 from binance.client import Client
 from binance.enums import *
 
-# Memoria de operaciones bloqueada para evitar cierres falsos
-ops_activas = {} 
+# === VARIABLES GLOBALES ===
+vigilantes_activos = set()
+ultimo_cierre_tiempo = 0
 
-def vigilante_blindado(c, sym, side, q, entry, palanca, comision, stop_loss):
-    global ops_activas
+def vigilante_ayer(c, sym, side, q, entry, palanca):
+    global vigilantes_activos, ultimo_cierre_tiempo
+    if sym in vigilantes_activos: return
+    vigilantes_activos.add(sym)
+    
     pico = 0.0
-    gatillo_trailing = 1.20 
-    margen_pegado = 0.05
+    margen_pegado = 0.15 
+    print(f"🛡️ [VIGILANTE] {sym} ACTIVO")
 
-    while sym in ops_activas:
+    while True:
         try:
             res = c.futures_mark_price(symbol=sym)
             m_p = float(res['markPrice'])
             
-            # ROI Real
+            # ROI de ayer (con 0.1% de comisión)
             diff = (m_p - entry) if side == "LONG" else (entry - m_p)
-            roi = ((diff / entry) * palanca - comision) * 100
+            roi = ((diff / entry) * palanca - 0.1) * 100 
             
             if roi > pico: pico = roi
-            piso = pico - margen_pegado if pico >= gatillo_trailing else -99.0
-            
-            # Actualizamos Dashboard
-            ops_activas[sym].update({"roi": roi, "pico": pico, "piso": piso})
+            piso = pico - margen_pegado if pico >= 1.2 else -99.0
 
-            # EL ÚNICO LUGAR DONDE SE CIERRA LA OPERACIÓN
-            meta_ganada = (pico >= gatillo_trailing and roi <= piso)
-            stop_tocado = (roi <= stop_loss)
+            # ESTO ES LO QUE TE GUSTABA VER:
+            print(f"📊 {sym} -> ROI: {roi:.2f}% | MAX: {pico:.2f}% | PISO: {piso:.2f}%")
 
-            if meta_ganada or stop_tocado:
+            # Cierre (Meta 1.2% o Stop Loss -4%)
+            if (pico >= 1.2 and roi <= piso) or (roi <= -4.0):
                 c.futures_create_order(symbol=sym, side=SIDE_SELL if side=="LONG" else SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=q)
-                print(f"\n✅ {sym} CERRADO | ROI: {roi:.2f}% | MOTIVO: {'META' if meta_ganada else 'SL'}")
-                if sym in ops_activas: del ops_activas[sym]
-                break 
-            
-            time.sleep(0.2)
-        except:
-            time.sleep(1)
+                print(f"🔥 CIERRE EN {sym} | ROI FINAL: {roi:.2f}%")
+                ultimo_cierre_tiempo = time.time()
+                break
 
-def bot_quantum_v13_final():
-    api_key = os.getenv("BINANCE_API_KEY") or os.getenv("API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET") or os.getenv("API_SECRET")
-    c = Client(api_key, api_secret)
-    c.API_URL = 'https://fapi.binance.com/fapi/v1'
+            time.sleep(2) 
+        except: time.sleep(5)
     
-    # Monedas rápidas y baratas como pediste
-    monedas = ['SOLUSDC', 'PEPEUSDC', 'DOGEUSDC', 'ADAUSDC']
-    palanca, stop_loss = 5, -4.0
-    max_ops = 2 
+    if sym in vigilantes_activos: vigilantes_activos.remove(sym)
 
-    print(f"🚀 V13 TOTAL BLOCK | DOBLE POSICIÓN | 90% CAPITAL")
-
+def bot_quantum_facil():
+    print("🚀 BOT INICIADO | 2 OPERACIONES | 45% C/U")
     while True:
         try:
-            # Sincronizar con Binance
-            pos = c.futures_position_information()
-            reales = [p for p in pos if float(p.get('positionAmt', 0)) != 0]
-            
-            simbolos_reales = [r['symbol'] for r in reales]
-            for s in list(ops_activas.keys()):
-                if s not in simbolos_reales: del ops_activas[s]
+            api_key = os.getenv("API_KEY"); api_secret = os.getenv("API_SECRET")
+            c = Client(api_key, api_secret)
+            c.API_URL = 'https://fapi.binance.com/fapi/v1'
 
             acc = c.futures_account()
-            disp = float(next((b['availableBalance'] for b in acc['assets'] if b['asset'] == 'USDC'), 0.0))
+            total_w = next((float(b['walletBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
+            disp = next((float(b['availableBalance']) for b in acc['assets'] if b['asset'] == 'USDC'), 0.0)
             
-            print(f"\n💰 DISP: {disp:.2f} USDC | ACTIVAS: {len(reales)}/{max_ops}")
-            
+            pos_info = c.futures_position_information()
+            reales = [p for p in pos_info if float(p.get('positionAmt', 0)) != 0]
+            simbolos_en_binance = [r['symbol'] for r in reales]
+
+            # 1. Reporte rápido
+            print(f"💰 WALLET: {total_w:.2f} | DISP: {disp:.2f} | ACTIVAS: {len(reales)}/2")
+
+            # 2. Enganchar lo que esté abierto (Modo Adopción de ayer)
             for r in reales:
-                s = r['symbol']
-                if s not in ops_activas:
-                    side_in = "LONG" if float(r['positionAmt']) > 0 else "SHORT"
-                    ops_activas[s] = {"roi": 0, "pico": 0, "piso": -99, "side": side_in}
-                    threading.Thread(target=vigilante_blindado, args=(c, s, side_in, abs(float(r['positionAmt'])), float(r['entryPrice']), palanca, 0.001, stop_loss), daemon=True).start()
-                
-                inf = ops_activas.get(s, {})
-                print(f"🔹 {s} | ROI: {inf.get('roi',0):.2f}% | MAX: {inf.get('pico',0):.2f}%")
+                if r['symbol'] not in vigilantes_activos:
+                    threading.Thread(target=vigilante_ayer, args=(c, r['symbol'], "LONG" if float(r['positionAmt']) > 0 else "SHORT", abs(float(r['positionAmt'])), float(r['entryPrice']), 5), daemon=True).start()
 
-            # RADAR DE ENTRADA (ESTO NO CIERRA NADA, SOLO ABRE)
-            if len(reales) < max_ops:
-                for m in monedas:
-                    if m in simbolos_reales: continue
+            # 3. Buscador de 2 operaciones
+            if len(reales) < 2 and (time.time() - ultimo_cierre_tiempo > 15):
+                for m in ['SOLUSDC', '1000PEPEUSDC', 'DOGEUSDC']:
+                    if m in simbolos_en_binance: continue
                     
-                    k = c.futures_klines(symbol=m, interval='1m', limit=35)
+                    k = c.futures_klines(symbol=m, interval='1m', limit=20)
                     cl = [float(x[4]) for x in k]
-                    e9, e27 = sum(cl[-9:])/9, sum(cl[-27:])/27
-                    e27_ant = sum(cl[-29:-2])/27
+                    e9, e15 = sum(cl[-9:])/9, sum(cl[-15:])/15
                     
-                    if (cl[-1] > e9 > e27) and (e27 > e27_ant): side_order = SIDE_BUY
-                    elif (cl[-1] < e9 < e27) and (e27 < e27_ant): side_order = SIDE_SELL
-                    else: continue
-
-                    monto = disp * 0.45 
-                    decs = 0 if m in ['PEPEUSDC', 'DOGEUSDC'] else 1
-                    cant = round((monto * palanca) / cl[-1], decs)
+                    side = None
+                    if cl[-1] > e9 > e15: side = SIDE_BUY
+                    elif cl[-1] < e9 < e15: side = SIDE_SELL
                     
-                    if (cant * cl[-1]) >= 5.1: # Margen de seguridad
-                        c.futures_change_leverage(symbol=m, leverage=palanca)
-                        c.futures_create_order(symbol=m, side=side_order, type=ORDER_TYPE_MARKET, quantity=cant)
-                        print(f"🎯 ENTRADA EN {m} CON EL 45%")
-                        time.sleep(5)
-                        break
+                    if side:
+                        # USAR EL 45% DEL CAPITAL TOTAL
+                        monto_op = total_w * 0.45
+                        cant = round((monto_op * 5) / cl[-1], 0 if 'PEPE' in m else (2 if 'SOL' in m else 0))
+                        
+                        if disp >= monto_op:
+                            c.futures_change_leverage(symbol=m, leverage=5)
+                            c.futures_create_order(symbol=m, side=side, type=ORDER_TYPE_MARKET, quantity=cant)
+                            print(f"🎯 DISPARO EN {m} (45% del capital)")
+                            break
 
-        except Exception as e:
-            time.sleep(2)
-        time.sleep(1)
+        except: time.sleep(10)
+        time.sleep(15)
 
 if __name__ == "__main__":
-    bot_quantum_v13_final()
+    bot_quantum_facil()
